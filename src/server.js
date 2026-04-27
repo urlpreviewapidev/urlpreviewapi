@@ -10,9 +10,6 @@ import fs from 'fs';
 import { execSync } from 'child_process';
 import { ensureChrome } from './utils/ensureChrome.js';
 
-import express from 'express';
-import { ensureChrome } from './utils/ensureChrome.js';
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
