@@ -2,25 +2,43 @@ import puppeteer from 'puppeteer';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { glob } from 'glob'; // npm i glob (já vem como dep do puppeteer)
 
 let browserInstance = null;
 
+async function resolveChromePath() {
+  if (process.env.NODE_ENV !== 'production') return undefined;
+
+  const matches = await glob(
+    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome'
+  );
+  return matches[0] ?? undefined;
+}
+
 async function getBrowser() {
-  return puppeteer.launch({
+  if (browserInstance) return browserInstance;
+
+  const executablePath = await resolveChromePath();
+
+  browserInstance = await puppeteer.launch({
     headless: true,
-    executablePath: process.env.NODE_ENV === 'production'
-      ? '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome'
-      : undefined,
+    executablePath,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--single-process',       // importante no Render free
+      '--single-process',
     ],
   });
-}
 
+  // Limpa instância se o browser fechar inesperadamente
+  browserInstance.on('disconnected', () => {
+    browserInstance = null;
+  });
+
+  return browserInstance;
+}
 
 const SCREENSHOTS_DIR = path.resolve('public/screenshots');
 if (!fs.existsSync(SCREENSHOTS_DIR)) {
