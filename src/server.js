@@ -5,6 +5,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { getPreview } from './preview.js';
 import { debugUrl } from './debug.js';
+import { glob } from 'glob';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,6 +35,22 @@ function isValidUrl(str) {
     return false;
   }
 }
+
+app.get('/debug-chrome', async (req, res) => {
+  const matches = await glob(
+    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome'
+  );
+
+  const exists = matches[0] ? fs.existsSync(matches[0]) : false;
+
+  res.json({
+    matches,
+    exists,
+    NODE_ENV: process.env.NODE_ENV,
+    cwd: process.cwd(),
+  });
+});
+
 
 app.get('/preview', async (req, res) => {
   const { url } = req.query;

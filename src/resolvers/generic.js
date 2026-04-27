@@ -58,7 +58,7 @@ export async function resolveGeneric(url, type = 'generic') {
       const screenshotPath = await takeScreenshot(url);
       image = `${BASE_URL}${screenshotPath}`;
     } catch (err) {
-      console.warn('[Screenshot] Falhou:', err.message);
+      console.error('[Screenshot] Falhou:', err.message, '\nStack:', err.stack);
       image = null;
     }
   }
