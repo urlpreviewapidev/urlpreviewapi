@@ -8,7 +8,14 @@ import { debugUrl } from './debug.js';
 import { glob } from 'glob';
 import fs from 'fs';
 import { execSync } from 'child_process';
+import { ensureChrome } from './utils/ensureChrome.js';
 
+// Primeira coisa antes do app.listen
+await ensureChrome();
+
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -1,82 +1,21 @@
-import puppeteer from 'puppeteer';
-import path from 'path';
-import fs from 'fs';
-import crypto from 'crypto';
-import { glob } from 'glob'; // npm i glob (já vem como dep do puppeteer)
+import { glob } from 'glob';
 
-let browserInstance = null;
-
-async function resolveChromePath() {
-  if (process.env.NODE_ENV !== 'production') return undefined;
-
+async function getChromePath() {
   const matches = await glob(
-    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome'
+    '/opt/render/.cache/puppeteer/chrome/**/chrome'
   );
-  return matches[0] ?? undefined;
+  return matches[0] ?? null;
 }
 
-async function getBrowser() {
-  if (browserInstance) return browserInstance;
+// No launch do puppeteer:
+const executablePath = await getChromePath();
 
-  const executablePath = await resolveChromePath();
-
-  browserInstance = await puppeteer.launch({
-    headless: true,
-    executablePath,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--single-process',
-    ],
-  });
-
-  // Limpa instância se o browser fechar inesperadamente
-  browserInstance.on('disconnected', () => {
-    browserInstance = null;
-  });
-
-  return browserInstance;
-}
-
-const SCREENSHOTS_DIR = path.resolve('public/screenshots');
-if (!fs.existsSync(SCREENSHOTS_DIR)) {
-  fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-}
-
-export async function takeScreenshot(url) {
-  const browser = await getBrowser();
-  const page = await browser.newPage();
-
-  try {
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-      '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
-    await page.setViewport({ width: 1280, height: 720 });
-
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      if (['font', 'media'].includes(req.resourceType())) req.abort();
-      else req.continue();
-    });
-
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 20000 });
-
-    const hash = crypto.createHash('md5').update(url).digest('hex');
-    const filename = `${hash}.webp`;
-    const filepath = path.join(SCREENSHOTS_DIR, filename);
-
-    await page.screenshot({
-      path: filepath,
-      type: 'webp',
-      quality: 80,
-      clip: { x: 0, y: 0, width: 1280, height: 720 },
-    });
-
-    return `/screenshots/${filename}`;
-  } finally {
-    await page.close();
-  }
-}
+const browser = await puppeteer.launch({
+  executablePath,
+  headless: true,
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+  ],
+});
