@@ -6,7 +6,6 @@ import { fileURLToPath } from 'url';
 import { getPreview } from './preview.js';
 import { debugUrl } from './debug.js';
 import { glob } from 'glob';
-import fs from 'fs';
 import { execSync } from 'child_process';
 import { ensureChrome } from './utils/ensureChrome.js';
 
@@ -15,16 +14,6 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// ✅ Sobe o servidor PRIMEIRO (Render exige porta aberta)
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-
-  // Instala o Chrome em background depois que a porta já está aberta
-  ensureChrome().then(() => {
-    console.log('[Chrome] Pronto para uso!');
-  });
-});
 
 app.use(express.json());
 
@@ -113,11 +102,17 @@ app.get('/debug', async (req, res) => {
   }
 });
 
-// ✅ Health check para o Render monitorar o serviço
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
+// ✅ Único app.listen — sobe a porta PRIMEIRO, Chrome em background
 app.listen(PORT, () => {
   console.log(`🚀 URL Preview API rodando em http://localhost:${PORT}`);
+
+  ensureChrome().then(() => {
+    console.log('[Chrome] Pronto para uso!');
+  }).catch((err) => {
+    console.error('[Chrome] Erro ao inicializar:', err.message);
+  });
 });
