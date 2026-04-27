@@ -1,3 +1,4 @@
+// src/resolvers/generic.js
 import { scrapeWithBrowser } from '../utils/browserScraper.js';
 import { tryOpenGraph } from '../utils/ogScraper.js';
 import { getFaviconUrl } from '../utils/detectSource.js';
@@ -19,11 +20,7 @@ function merge(primary, fallback) {
 
 function resolveIcon(favicon, pageUrl) {
   if (!favicon) return getFaviconUrl(pageUrl);
-
-  // Já é URL absoluta
   if (favicon.startsWith('http')) return favicon;
-
-  // Path relativo → converte para absoluto usando a origem da URL
   try {
     const origin = new URL(pageUrl).origin;
     return new URL(favicon, origin).href;
@@ -47,16 +44,17 @@ export async function resolveGeneric(url, type = 'generic') {
 
   const merged = merge(browserData, ogData);
 
-  // Resolve imagem: OG image → screenshot como fallback
   let image = merged.image || null;
 
   if (image) {
     image = image.startsWith('http') ? image : `${BASE_URL}${image}`;
   } else {
-    // Nenhuma OG image encontrada — tira screenshot
+    // ✅ Corrigido: screenshotDataUrl já é data URI completo
     try {
-      const screenshotPath = await takeScreenshot(url);
-      image = `${BASE_URL}${screenshotPath}`;
+      console.log('[Screenshot] Iniciando para:', url);
+      const screenshotDataUrl = await takeScreenshot(url);
+      console.log('[Screenshot] Sucesso, tamanho:', screenshotDataUrl.length);
+      image = screenshotDataUrl;
     } catch (err) {
       console.error('[Screenshot] Falhou:', err.message, '\nStack:', err.stack);
       image = null;
@@ -76,5 +74,3 @@ export async function resolveGeneric(url, type = 'generic') {
     },
   };
 }
-
-// http://localhost:3000/preview?url=https://uai-346a1a.netlify.app/
