@@ -1,36 +1,20 @@
-import { execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { glob } from 'glob';
 
-const CACHE_DIR = '/opt/render/.cache/puppeteer';
-
-function findChromeSync() {
-  try {
-    // Busca recursiva pelo binário
-    const result = execSync(
-      `find ${CACHE_DIR} -name "chrome" -type f 2>/dev/null | head -1`
-    ).toString().trim();
-    return result || null;
-  } catch {
-    return null;
-  }
+async function findChrome() {
+  const matches = await glob(
+    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome'
+  );
+  return matches.find(p => !p.includes('sandbox') && !p.includes('wrapper')) ?? null;
 }
 
 export async function ensureChrome() {
-  let chromePath = findChromeSync();
+  const chromePath = await findChrome();
 
-  if (chromePath && fs.existsSync(chromePath)) {
+  if (chromePath) {
     console.log('[Chrome] Encontrado em:', chromePath);
     return chromePath;
   }
 
-  console.log('[Chrome] Instalando...');
-  execSync('node node_modules/puppeteer/install.mjs', {
-    stdio: 'inherit',
-    env: { ...process.env, PUPPETEER_CACHE_DIR: CACHE_DIR },
-  });
-
-  chromePath = findChromeSync();
-  console.log('[Chrome] Path após instalação:', chromePath);
-  return chromePath;
+  console.log('[Chrome] Não encontrado!');
+  return null;
 }

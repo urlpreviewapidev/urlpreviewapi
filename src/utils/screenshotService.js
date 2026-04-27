@@ -1,19 +1,23 @@
 import puppeteer from 'puppeteer';
-import { execSync } from 'child_process';
+import { glob } from 'glob';
 
-function getChromePath() {
-  try {
-    return execSync(
-      `find /opt/render/.cache/puppeteer -name "chrome" -type f 2>/dev/null | head -1`
-    ).toString().trim() || null;
-  } catch {
-    return null;
-  }
+async function getChromePath() {
+  // Pattern exato baseado no debug-chrome
+  const matches = await glob(
+    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome'
+  );
+
+  const chromePath = matches.find(p => !p.includes('sandbox') && !p.includes('wrapper'));
+  console.log('[Chrome] Path encontrado:', chromePath ?? 'NENHUM');
+  return chromePath ?? null;
 }
 
 export async function takeScreenshot(url) {
-  const executablePath = getChromePath();
-  console.log('[Screenshot] Usando Chrome em:', executablePath);
+  const executablePath = await getChromePath();
+
+  if (!executablePath) {
+    throw new Error('Chrome não encontrado em /opt/render/.cache/puppeteer');
+  }
 
   const browser = await puppeteer.launch({
     executablePath,
@@ -22,6 +26,8 @@ export async function takeScreenshot(url) {
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--single-process',
     ],
   });
 
