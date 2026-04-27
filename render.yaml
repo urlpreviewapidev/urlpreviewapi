@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: url-preview-api
+    runtime: node
+    plan: free
+    buildCommand: npm install && npx puppeteer browsers install chrome
+    startCommand: node src/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BASE_URL
+        sync: false
+    healthCheckPath: /health

@@ -1,15 +1,21 @@
 import puppeteer from 'puppeteer';
 
-export async function getBrowser() {
+async function getBrowser() {
   return puppeteer.launch({
     headless: true,
+    executablePath: process.env.NODE_ENV === 'production'
+      ? '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome'
+      : undefined,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--single-process',       // importante no Render free
     ],
   });
 }
+
 
 export async function scrapeWithBrowser(url) {
   let browser;

@@ -6,19 +6,21 @@ import crypto from 'crypto';
 let browserInstance = null;
 
 async function getBrowser() {
-  if (!browserInstance || !browserInstance.connected) {
-    browserInstance = await puppeteer.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
-    });
-  }
-  return browserInstance;
+  return puppeteer.launch({
+    headless: true,
+    executablePath: process.env.NODE_ENV === 'production'
+      ? '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome'
+      : undefined,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--single-process',       // importante no Render free
+    ],
+  });
 }
+
 
 const SCREENSHOTS_DIR = path.resolve('public/screenshots');
 if (!fs.existsSync(SCREENSHOTS_DIR)) {

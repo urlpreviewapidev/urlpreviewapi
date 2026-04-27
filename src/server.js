@@ -71,7 +71,11 @@ app.get('/debug', async (req, res) => {
   }
 });
 
+// ✅ Health check para o Render monitorar o serviço
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 URL Preview API rodando em http://localhost:${PORT}`);
 });
-
