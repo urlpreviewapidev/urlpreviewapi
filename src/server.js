@@ -7,6 +7,8 @@ import { getPreview } from './preview.js';
 import { debugUrl } from './debug.js';
 import { glob } from 'glob';
 import fs from 'fs';
+import { execSync } from 'child_process';
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,20 +39,32 @@ function isValidUrl(str) {
 }
 
 app.get('/debug-chrome', async (req, res) => {
-  const matches = await glob(
-    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome'
-  );
+  let findResult = '';
+  let whichResult = '';
+  let globResult = [];
 
-  const exists = matches[0] ? fs.existsSync(matches[0]) : false;
+  try {
+    findResult = execSync(
+      'find /opt/render/.cache/puppeteer -name "chrome" -type f 2>/dev/null || echo "nada"'
+    ).toString().trim();
+  } catch (e) {
+    findResult = e.message;
+  }
 
-  res.json({
-    matches,
-    exists,
-    NODE_ENV: process.env.NODE_ENV,
-    cwd: process.cwd(),
-  });
+  try {
+    whichResult = execSync('which chromium-browser || which chromium || which google-chrome || echo "nenhum no PATH"').toString().trim();
+  } catch (e) {
+    whichResult = e.message;
+  }
+
+  try {
+    globResult = await glob('/opt/render/.cache/puppeteer/**/*chrome*');
+  } catch (e) {
+    globResult = [e.message];
+  }
+
+  res.json({ findResult, whichResult, globResult, NODE_ENV: process.env.NODE_ENV });
 });
-
 
 app.get('/preview', async (req, res) => {
   const { url } = req.query;
