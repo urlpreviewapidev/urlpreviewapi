@@ -110,7 +110,7 @@ app.get('/debug', requireChrome, async (req, res) => {
 
 // ✅ Sobe porta imediatamente, baixa Chrome em background
 app.listen(PORT, () => {
-  console.log(`🚀 URL Preview API rodando em http://localhost:${PORT}`);
+  // console.log(`🚀 URL Preview API rodando em http://localhost:${PORT}`);
 
   ensureChrome()
     .then(() => { chromeReady = true; })

@@ -8,7 +8,7 @@ async function getChromePath() {
   );
 
   const chromePath = matches.find(p => !p.includes('sandbox') && !p.includes('wrapper'));
-  console.log('[Chrome] Path encontrado:', chromePath ?? 'NENHUM');
+  // console.log('[Chrome] Path encontrado:', chromePath ?? 'NENHUM');
   return chromePath ?? null;
 }
 
@@ -35,6 +35,16 @@ export async function takeScreenshot(url) {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 720 });
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 15000 });
+
+    // // Reduzir viewport
+    // await page.setViewport({ width: 800, height: 450 });
+
+    // // Ou reduzir qualidade
+    // const screenshot = await page.screenshot({
+    //   type: 'jpeg',
+    //   quality: 60, // era 80
+    //   encoding: 'base64',
+    // });
 
     const screenshot = await page.screenshot({
       type: 'jpeg',

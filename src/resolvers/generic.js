@@ -51,9 +51,9 @@ export async function resolveGeneric(url, type = 'generic') {
   } else {
     // ✅ Corrigido: screenshotDataUrl já é data URI completo
     try {
-      console.log('[Screenshot] Iniciando para:', url);
+      // console.log('[Screenshot] Iniciando para:', url);
       const screenshotDataUrl = await takeScreenshot(url);
-      console.log('[Screenshot] Sucesso, tamanho:', screenshotDataUrl.length);
+      // console.log('[Screenshot] Sucesso, tamanho:', screenshotDataUrl.length);
       image = screenshotDataUrl;
     } catch (err) {
       console.error('[Screenshot] Falhou:', err.message, '\nStack:', err.stack);

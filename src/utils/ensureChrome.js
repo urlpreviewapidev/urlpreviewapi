@@ -18,11 +18,11 @@ export async function ensureChrome() {
   let chromePath = await findChrome();
 
   if (chromePath) {
-    console.log('[Chrome] Encontrado em:', chromePath);
+    // console.log('[Chrome] Encontrado em:', chromePath);
     return chromePath;
   }
 
-  console.log('[Chrome] Não encontrado. Baixando agora...');
+  // console.log('[Chrome] Não encontrado. Baixando agora...');
   try {
     execSync('node node_modules/puppeteer/install.mjs', {
       cwd: ROOT,
@@ -40,6 +40,6 @@ export async function ensureChrome() {
   chromePath = await findChrome();
   if (!chromePath) throw new Error('[Chrome] Instalado mas binário não encontrado!');
 
-  console.log('[Chrome] Pronto em:', chromePath);
+  // console.log('[Chrome] Pronto em:', chromePath);
   return chromePath;
 }
