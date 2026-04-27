@@ -16,11 +16,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
-
-// Serve screenshots publicamente
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// Rate limiting: máx 30 requisições por minuto por IP
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
@@ -37,6 +34,16 @@ function isValidUrl(str) {
   }
 }
 
+// Flag global — endpoints aguardam o Chrome estar pronto
+let chromeReady = false;
+let chromeError = null;
+
+function requireChrome(req, res, next) {
+  if (chromeError) return res.status(503).json({ error: 'Chrome falhou ao inicializar.', detail: chromeError });
+  if (!chromeReady) return res.status(503).json({ error: 'Chrome ainda inicializando. Tente em alguns segundos.' });
+  next();
+}
+
 app.get('/debug-chrome', async (req, res) => {
   let findResult = '';
   let whichResult = '';
@@ -46,29 +53,28 @@ app.get('/debug-chrome', async (req, res) => {
     findResult = execSync(
       'find /opt/render/.cache/puppeteer -name "chrome" -type f 2>/dev/null || echo "nada"'
     ).toString().trim();
-  } catch (e) {
-    findResult = e.message;
-  }
+  } catch (e) { findResult = e.message; }
 
   try {
     whichResult = execSync('which chromium-browser || which chromium || which google-chrome || echo "nenhum no PATH"').toString().trim();
-  } catch (e) {
-    whichResult = e.message;
-  }
+  } catch (e) { whichResult = e.message; }
 
   try {
     globResult = await glob('/opt/render/.cache/puppeteer/**/*chrome*');
-  } catch (e) {
-    globResult = [e.message];
-  }
+  } catch (e) { globResult = [e.message]; }
 
-  res.json({ findResult, whichResult, globResult, NODE_ENV: process.env.NODE_ENV });
+  res.json({ findResult, whichResult, globResult, chromeReady, chromeError, NODE_ENV: process.env.NODE_ENV });
 });
 
-app.get('/preview', async (req, res) => {
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', chromeReady });
+});
+
+// Rotas que precisam do Chrome
+app.get('/preview', requireChrome, async (req, res) => {
   const { url } = req.query;
   if (!url) return res.status(400).json({ error: 'Parâmetro "url" é obrigatório.' });
-  if (!isValidUrl(url)) return res.status(400).json({ error: 'URL inválida. Use http:// ou https://' });
+  if (!isValidUrl(url)) return res.status(400).json({ error: 'URL inválida.' });
   try {
     const preview = await getPreview(url);
     return res.json({ success: true, data: preview });
@@ -78,10 +84,10 @@ app.get('/preview', async (req, res) => {
   }
 });
 
-app.post('/preview', async (req, res) => {
+app.post('/preview', requireChrome, async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'Campo "url" é obrigatório no body.' });
-  if (!isValidUrl(url)) return res.status(400).json({ error: 'URL inválida. Use http:// ou https://' });
+  if (!isValidUrl(url)) return res.status(400).json({ error: 'URL inválida.' });
   try {
     const preview = await getPreview(url);
     return res.json({ success: true, data: preview });
@@ -91,7 +97,7 @@ app.post('/preview', async (req, res) => {
   }
 });
 
-app.get('/debug', async (req, res) => {
+app.get('/debug', requireChrome, async (req, res) => {
   const { url } = req.query;
   if (!url || !isValidUrl(url)) return res.status(400).json({ error: 'URL inválida.' });
   try {
@@ -102,17 +108,11 @@ app.get('/debug', async (req, res) => {
   }
 });
 
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
-});
-
-// ✅ Único app.listen — sobe a porta PRIMEIRO, Chrome em background
+// ✅ Sobe porta imediatamente, baixa Chrome em background
 app.listen(PORT, () => {
   console.log(`🚀 URL Preview API rodando em http://localhost:${PORT}`);
 
-  ensureChrome().then(() => {
-    console.log('[Chrome] Pronto para uso!');
-  }).catch((err) => {
-    console.error('[Chrome] Erro ao inicializar:', err.message);
-  });
+  ensureChrome()
+    .then(() => { chromeReady = true; })
+    .catch((err) => { chromeError = err.message; });
 });
