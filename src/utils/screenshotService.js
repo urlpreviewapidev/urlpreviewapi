@@ -1,15 +1,19 @@
 import puppeteer from 'puppeteer';
-import { glob } from 'glob';
+import { execSync } from 'child_process';
 
-async function getChromePath() {
-  const matches = await glob(
-    '/opt/render/.cache/puppeteer/chrome/**/chrome'
-  );
-  return matches[0] ?? null;
+function getChromePath() {
+  try {
+    return execSync(
+      `find /opt/render/.cache/puppeteer -name "chrome" -type f 2>/dev/null | head -1`
+    ).toString().trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function takeScreenshot(url) {
-  const executablePath = await getChromePath();
+  const executablePath = getChromePath();
+  console.log('[Screenshot] Usando Chrome em:', executablePath);
 
   const browser = await puppeteer.launch({
     executablePath,
@@ -23,7 +27,6 @@ export async function takeScreenshot(url) {
 
   try {
     const page = await browser.newPage();
-
     await page.setViewport({ width: 1280, height: 720 });
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 15000 });
 

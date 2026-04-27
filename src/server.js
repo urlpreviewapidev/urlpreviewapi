@@ -10,18 +10,24 @@ import fs from 'fs';
 import { execSync } from 'child_process';
 import { ensureChrome } from './utils/ensureChrome.js';
 
-// Primeira coisa antes do app.listen
-await ensureChrome();
-
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-});
+import express from 'express';
+import { ensureChrome } from './utils/ensureChrome.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// ✅ Sobe o servidor PRIMEIRO (Render exige porta aberta)
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
+
+  // Instala o Chrome em background depois que a porta já está aberta
+  ensureChrome().then(() => {
+    console.log('[Chrome] Pronto para uso!');
+  });
+});
 
 app.use(express.json());
 

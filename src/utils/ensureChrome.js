@@ -1,35 +1,36 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
-import { glob } from 'glob';
+import path from 'path';
+
+const CACHE_DIR = '/opt/render/.cache/puppeteer';
+
+function findChromeSync() {
+  try {
+    // Busca recursiva pelo binário
+    const result = execSync(
+      `find ${CACHE_DIR} -name "chrome" -type f 2>/dev/null | head -1`
+    ).toString().trim();
+    return result || null;
+  } catch {
+    return null;
+  }
+}
 
 export async function ensureChrome() {
-  const matches = await glob(
-    '/opt/render/.cache/puppeteer/chrome/**/chrome'
-  );
+  let chromePath = findChromeSync();
 
-  if (matches.length > 0 && fs.existsSync(matches[0])) {
-    console.log('[Chrome] Encontrado em:', matches[0]);
-    return matches[0];
+  if (chromePath && fs.existsSync(chromePath)) {
+    console.log('[Chrome] Encontrado em:', chromePath);
+    return chromePath;
   }
 
-  console.log('[Chrome] Não encontrado. Instalando via Puppeteer...');
+  console.log('[Chrome] Instalando...');
+  execSync('node node_modules/puppeteer/install.mjs', {
+    stdio: 'inherit',
+    env: { ...process.env, PUPPETEER_CACHE_DIR: CACHE_DIR },
+  });
 
-  try {
-    execSync('node node_modules/puppeteer/install.mjs', {
-      stdio: 'inherit',
-      env: {
-        ...process.env,
-        PUPPETEER_CACHE_DIR: '/opt/render/.cache/puppeteer',
-      },
-    });
-    console.log('[Chrome] Instalado com sucesso!');
-  } catch (err) {
-    console.error('[Chrome] Falhou ao instalar:', err.message);
-  }
-
-  const afterInstall = await glob(
-    '/opt/render/.cache/puppeteer/chrome/**/chrome'
-  );
-
-  return afterInstall[0] ?? null;
+  chromePath = findChromeSync();
+  console.log('[Chrome] Path após instalação:', chromePath);
+  return chromePath;
 }
