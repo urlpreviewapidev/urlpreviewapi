@@ -35,7 +35,13 @@ async function resolveViaOembed(url) {
 
 async function resolveProfileFallback(url, username) {
   // Tenta screenshot direto sem browser scraping (TikTok bloqueia scraping de perfil)
-  const image = await takeScreenshot(url).catch(() => null);
+  // src/resolvers/tiktok.js
+  image = await takeScreenshot(url, {
+    waitUntil: 'domcontentloaded',
+    timeout: 10_000,
+    waitAfterLoad: 1_500, // aguarda 1.5s para JS renderizar
+  }).catch(() => null);
+
 
   return {
     title: `@${username} no TikTok`,
