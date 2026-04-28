@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { getPreview } from './preview.js';
 import { debugUrl } from './debug.js';
 import { ensureChrome } from './utils/ensureChrome.js';
+import puppeteer from 'puppeteer';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,27 +15,20 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ─── Middlewares globais ─────────────────────────────────────────────────────
-
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// ─── Rate limiters ───────────────────────────────────────────────────────────
-
 const previewLimiter = rateLimit({
-  windowMs: 60 * 1_000,
+  windowMs: 60_000,
   max: 30,
   message: { error: 'Muitas requisições. Tente novamente em 1 minuto.' },
 });
 
-// /debug abre browser headless — limitar agressivamente
 const debugLimiter = rateLimit({
-  windowMs: 60 * 1_000,
+  windowMs: 60_000,
   max: 5,
   message: { error: 'Limite de requisições de debug atingido.' },
 });
-
-// ─── Validação de URL ────────────────────────────────────────────────────────
 
 function isValidUrl(str) {
   try {
@@ -45,8 +39,6 @@ function isValidUrl(str) {
   }
 }
 
-// ─── Estado do Chrome ────────────────────────────────────────────────────────
-
 let chromeReady = false;
 let chromeError = null;
 
@@ -56,20 +48,20 @@ function requireChrome(req, res, next) {
   next();
 }
 
-// ─── Rotas ───────────────────────────────────────────────────────────────────
+// ─── Health ───────────────────────────────────────────────────────────────────
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', chromeReady });
+  res.json({ status: 'ok', chromeReady, chromeError });
 });
+
+// ─── Debug seguro (sem executar Chrome) ──────────────────────────────────────
 
 app.get('/debug-safe', async (req, res) => {
   const { execSync } = await import('child_process');
   const fs = await import('fs');
   const results = {};
-
   const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH;
 
-  // 1. Arquivo existe e permissões
   try {
     const stat = fs.statSync(chromePath);
     results.exists = true;
@@ -80,34 +72,29 @@ app.get('/debug-safe', async (req, res) => {
     results.stat_error = e.message;
   }
 
-  // 2. ldd — verifica dependências faltando (não executa o Chrome)
   try {
-    results.ldd = execSync(`ldd "${chromePath}" 2>&1 | grep "not found"`, {
-      timeout: 5000,
-    }).toString().trim() || 'all libs found ✅';
+    results.ldd = execSync(`ldd "${chromePath}" 2>&1 | grep "not found"`, { timeout: 5000 })
+      .toString().trim() || 'all libs found ✅';
   } catch (e) {
     results.ldd = e.stdout?.toString() || 'all libs found ✅';
   }
 
-  // 3. Memória disponível
   try {
     results.memory = execSync('free -m', { timeout: 3000 }).toString().trim();
   } catch (e) {
     results.memory_error = e.message;
   }
 
-  // 4. Espaço em disco
-  try {
-    results.disk = execSync('df -h /opt/render', { timeout: 3000 }).toString().trim();
-  } catch (e) {
-    results.disk_error = e.message;
-  }
+  results.chromePath = chromePath;
+  results.chromeReady = chromeReady;
+  results.chromeError = chromeError;
 
   res.json(results);
 });
 
+// ─── Debug launch ─────────────────────────────────────────────────────────────
+
 app.get('/debug-launch', async (req, res) => {
-  // Responde em no máximo 30s
   const timer = setTimeout(() => {
     if (!res.headersSent) res.status(504).json({ error: 'timeout após 30s' });
   }, 30000);
@@ -130,7 +117,6 @@ app.get('/debug-launch', async (req, res) => {
     await browser.close();
     clearTimeout(timer);
     res.json({ success: true, version });
-
   } catch (err) {
     clearTimeout(timer);
     res.status(500).json({
@@ -141,97 +127,8 @@ app.get('/debug-launch', async (req, res) => {
   }
 });
 
-// rota temporária de diagnóstico
-app.get('/debug-chrome-exec', async (req, res) => {
-  const chromePath = '/opt/render/.cache/puppeteer/chrome/linux-147.0.7727.57/chrome-linux64/chrome';
-  const results = {};
+// ─── Preview ──────────────────────────────────────────────────────────────────
 
-  // 1. Arquivo existe?
-  results.exists = fs.existsSync(chromePath);
-
-  // 2. Permissões
-  try {
-    const stat = fs.statSync(chromePath);
-    results.mode = stat.mode.toString(8);
-    results.size = stat.size;
-  } catch (e) {
-    results.stat_error = e.message;
-  }
-
-  // 3. Tenta executar --version
-  try {
-    const version = execSync(`"${chromePath}" --version`, {
-      timeout: 5000,
-      env: { ...process.env, DISPLAY: '' }
-    }).toString().trim();
-    results.version = version;
-  } catch (e) {
-    results.exec_error = e.message;
-    results.exec_stderr = e.stderr?.toString();
-  }
-
-  // 4. Tenta puppeteer.launch()
-  try {
-    const browser = await puppeteer.launch({
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--no-zygote',
-        '--single-process',             // ← usa 1 processo só, economiza RAM
-        '--memory-pressure-off',
-        '--max_old_space_size=256',     // ← limita heap do V8 do Chrome
-        '--disable-extensions',
-        '--disable-background-networking',
-        '--disable-default-apps',
-        '--disable-sync',
-        '--no-first-run',
-        '--disable-translate',
-      ],
-    });
-    results.launch = 'success';
-    await browser.close();
-  } catch (e) {
-    results.launch_error = e.message;
-  }
-
-  res.json(results);
-});
-
-
-// rota temporária de diagnóstico — remover após resolver
-app.get('/debug-chrome', async (req, res) => {
-  const { execSync } = await import('child_process');
-
-  const results = {};
-
-  // Tenta localizar o chrome
-  try { results.which_chrome = execSync('which chromium-browser || which chromium || which google-chrome || which chrome || echo "not found"').toString().trim(); } catch (e) { results.which_chrome = e.message; }
-
-  // Lista o cache do puppeteer
-  try { results.puppeteer_cache = execSync('find /opt/render/.cache/puppeteer -name "chrome" -o -name "chromium" 2>/dev/null | head -20').toString().trim(); } catch (e) { results.puppeteer_cache = e.message; }
-
-  // Verifica variáveis de ambiente relevantes
-  results.env = {
-    PUPPETEER_CACHE_DIR: process.env.PUPPETEER_CACHE_DIR,
-    PUPPETEER_EXECUTABLE_PATH: process.env.PUPPETEER_EXECUTABLE_PATH,
-    PUPPETEER_SKIP_DOWNLOAD: process.env.PUPPETEER_SKIP_DOWNLOAD,
-  };
-
-  // executablePath do puppeteer
-  try {
-    const puppeteer = await import('puppeteer');
-    results.puppeteer_executablePath = puppeteer.default.executablePath();
-  } catch (e) { results.puppeteer_executablePath = e.message; }
-
-  res.json(results);
-});
-
-
-// Helper compartilhado entre GET e POST
 async function handlePreview(url, res) {
   if (!url) return res.status(400).json({ error: 'URL é obrigatória.' });
   if (!isValidUrl(url)) return res.status(400).json({ error: 'URL inválida.' });
@@ -260,7 +157,7 @@ app.get('/debug', debugLimiter, requireChrome, async (req, res) => {
   }
 });
 
-// ─── Startup ─────────────────────────────────────────────────────────────────
+// ─── Startup ──────────────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
   console.info(`🚀 URL Preview API rodando em http://localhost:${PORT}`);
@@ -268,7 +165,6 @@ app.listen(PORT, () => {
   ensureChrome()
     .then((executablePath) => {
       chromeReady = true;
-      // ← salva o path para usar no puppeteer.launch()
       process.env.PUPPETEER_EXECUTABLE_PATH = executablePath;
       console.info('[Chrome] ✅ Pronto:', executablePath);
     })
@@ -277,4 +173,3 @@ app.listen(PORT, () => {
       console.error('[Chrome] ❌ Falha:', err.message);
     });
 });
-
