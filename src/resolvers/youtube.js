@@ -52,6 +52,7 @@ export async function resolveYoutube(url) {
       icon: getFaviconUrl(url),
       url,
       extra: {
+        siteName: 'YouTube', // ← adiciona hardcoded
         videoId,
         channel: snippet.channelTitle,
         channelId: snippet.channelId,

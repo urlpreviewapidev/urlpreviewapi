@@ -1,38 +1,57 @@
+// src/utils/browserScraper.js
 import puppeteer from 'puppeteer';
+import { getChromePath } from './chromePath.js';
 
-async function getBrowser() {
-  return puppeteer.launch({
-    headless: true,
-    executablePath: process.env.NODE_ENV === 'production'
-      ? '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome'
-      : undefined,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--single-process',       // importante no Render free
-    ],
-  });
-}
+const DEFAULT_UA =
+  'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
 
+/**
+ * Abre um browser headless e extrai meta tags da página.
+ * Opcionalmente tira um screenshot da página.
+ *
+ * @param {string} url
+ * @param {object} [options]
+ * @param {string}  [options.userAgent]
+ * @param {number}  [options.timeout=15000]
+ * @param {'networkidle2'|'networkidle0'|'domcontentloaded'|'load'} [options.waitUntil]
+ * @param {boolean} [options.takeScreenshot=false]
+ * @returns {Promise<{title, description, image, favicon, siteName, locale, canonicalUrl, screenshot?}>}
+ */
+export async function scrapeWithBrowser(url, options = {}) {
+  const executablePath = await getChromePath();
 
-export async function scrapeWithBrowser(url) {
+  if (executablePath === null) {
+    throw new Error('Chrome não encontrado no cache do Puppeteer');
+  }
+
+  const {
+    userAgent = DEFAULT_UA,
+    timeout = 15000,
+    waitUntil = 'networkidle2',
+    takeScreenshot: shouldScreenshot = false,
+  } = options;
+
   let browser;
   try {
-    browser = await getBrowser();
-    const page = await browser.newPage();
-
-    await page.setUserAgent(
-      'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
-    );
-
-    await page.goto(url, {
-      waitUntil: 'networkidle2',
-      timeout: 15000,
+    browser = await puppeteer.launch({
+      headless: true,
+      ...(executablePath ? { executablePath } : {}),
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--single-process',
+      ],
     });
 
-    const data = await page.evaluate(() => {
+    const page = await browser.newPage();
+    await page.setUserAgent(userAgent);
+    await page.goto(url, { waitUntil, timeout });
+
+    // ── Extração de meta tags ────────────────────────────────────────────
+    // Separado do return para permitir o screenshot após o evaluate
+    const meta = await page.evaluate(() => {
       const getMeta = (selectors) => {
         for (const sel of selectors) {
           const el = document.querySelector(sel);
@@ -75,7 +94,24 @@ export async function scrapeWithBrowser(url) {
       };
     });
 
-    return data;
+    // ── Screenshot opcional ──────────────────────────────────────────────
+    // Só executa se explicitamente solicitado e não há imagem OG disponível
+    if (shouldScreenshot && !meta.image) {
+      try {
+        const raw = await page.screenshot({
+          type: 'jpeg',
+          quality: 85,
+          encoding: 'base64',
+        });
+        meta.screenshot = `data:image/jpeg;base64,${raw}`;
+      } catch (err) {
+        console.warn('[browserScraper] Screenshot falhou:', err.message);
+        // não propaga — screenshot é melhor esforço
+      }
+    }
+
+    return meta;
+
   } finally {
     await browser?.close();
   }

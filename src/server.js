@@ -1,3 +1,4 @@
+// src/server.js
 import 'dotenv/config';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
@@ -5,8 +6,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { getPreview } from './preview.js';
 import { debugUrl } from './debug.js';
-import { glob } from 'glob';
-import { execSync } from 'child_process';
 import { ensureChrome } from './utils/ensureChrome.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -15,26 +14,39 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ─── Middlewares globais ─────────────────────────────────────────────────────
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-const limiter = rateLimit({
-  windowMs: 60 * 1000,
+// ─── Rate limiters ───────────────────────────────────────────────────────────
+
+const previewLimiter = rateLimit({
+  windowMs: 60 * 1_000,
   max: 30,
   message: { error: 'Muitas requisições. Tente novamente em 1 minuto.' },
 });
-app.use('/preview', limiter);
+
+// /debug abre browser headless — limitar agressivamente
+const debugLimiter = rateLimit({
+  windowMs: 60 * 1_000,
+  max: 5,
+  message: { error: 'Limite de requisições de debug atingido.' },
+});
+
+// ─── Validação de URL ────────────────────────────────────────────────────────
 
 function isValidUrl(str) {
   try {
-    const url = new URL(str);
-    return ['http:', 'https:'].includes(url.protocol);
+    const { protocol } = new URL(str);
+    return protocol === 'http:' || protocol === 'https:';
   } catch {
     return false;
   }
 }
 
-// Flag global — endpoints aguardam o Chrome estar pronto
+// ─── Estado do Chrome ────────────────────────────────────────────────────────
+
 let chromeReady = false;
 let chromeError = null;
 
@@ -44,37 +56,49 @@ function requireChrome(req, res, next) {
   next();
 }
 
-app.get('/debug-chrome', async (req, res) => {
+// ─── Rotas ───────────────────────────────────────────────────────────────────
+
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', chromeReady });
+});
+
+// Expõe informações de infraestrutura — disponível apenas fora de produção
+app.get('/debug-chrome', (req, res, next) => {
+  if (process.env.NODE_ENV === 'production') return res.status(404).end();
+  next();
+}, async (_req, res) => {
+  const { glob } = await import('glob');
+  const { execSync } = await import('child_process');
+  const { CHROME_GLOB, PUPPETEER_CACHE_DIR } = await import('./utils/puppeteerConfig.js');
+
   let findResult = '';
   let whichResult = '';
   let globResult = [];
 
   try {
     findResult = execSync(
-      'find /opt/render/.cache/puppeteer -name "chrome" -type f 2>/dev/null || echo "nada"'
+      `find ${PUPPETEER_CACHE_DIR} -name "chrome" -type f 2>/dev/null || echo "nada"`
     ).toString().trim();
   } catch (e) { findResult = e.message; }
 
   try {
-    whichResult = execSync('which chromium-browser || which chromium || which google-chrome || echo "nenhum no PATH"').toString().trim();
+    whichResult = execSync(
+      'which chromium-browser || which chromium || which google-chrome || echo "nenhum no PATH"'
+    ).toString().trim();
   } catch (e) { whichResult = e.message; }
 
   try {
-    globResult = await glob('/opt/render/.cache/puppeteer/**/*chrome*');
+    globResult = await glob(CHROME_GLOB);
   } catch (e) { globResult = [e.message]; }
 
-  res.json({ findResult, whichResult, globResult, chromeReady, chromeError, NODE_ENV: process.env.NODE_ENV });
+  res.json({ findResult, whichResult, globResult, chromeReady, chromeError });
 });
 
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', chromeReady });
-});
-
-// Rotas que precisam do Chrome
-app.get('/preview', requireChrome, async (req, res) => {
-  const { url } = req.query;
-  if (!url) return res.status(400).json({ error: 'Parâmetro "url" é obrigatório.' });
+// Helper compartilhado entre GET e POST
+async function handlePreview(url, res) {
+  if (!url) return res.status(400).json({ error: 'URL é obrigatória.' });
   if (!isValidUrl(url)) return res.status(400).json({ error: 'URL inválida.' });
+
   try {
     const preview = await getPreview(url);
     return res.json({ success: true, data: preview });
@@ -82,24 +106,15 @@ app.get('/preview', requireChrome, async (req, res) => {
     console.error(`[Preview Error] ${url}:`, err.message);
     return res.status(500).json({ error: 'Não foi possível gerar o preview.', detail: err.message });
   }
-});
+}
 
-app.post('/preview', requireChrome, async (req, res) => {
-  const { url } = req.body;
-  if (!url) return res.status(400).json({ error: 'Campo "url" é obrigatório no body.' });
-  if (!isValidUrl(url)) return res.status(400).json({ error: 'URL inválida.' });
-  try {
-    const preview = await getPreview(url);
-    return res.json({ success: true, data: preview });
-  } catch (err) {
-    console.error(`[Preview Error] ${url}:`, err.message);
-    return res.status(500).json({ error: 'Não foi possível gerar o preview.', detail: err.message });
-  }
-});
+app.get('/preview', previewLimiter, requireChrome, (req, res) => handlePreview(req.query.url, res));
+app.post('/preview', previewLimiter, requireChrome, (req, res) => handlePreview(req.body.url, res));
 
-app.get('/debug', requireChrome, async (req, res) => {
+app.get('/debug', debugLimiter, requireChrome, async (req, res) => {
   const { url } = req.query;
   if (!url || !isValidUrl(url)) return res.status(400).json({ error: 'URL inválida.' });
+
   try {
     const info = await debugUrl(url);
     return res.json(info);
@@ -108,11 +123,18 @@ app.get('/debug', requireChrome, async (req, res) => {
   }
 });
 
-// ✅ Sobe porta imediatamente, baixa Chrome em background
+// ─── Startup ─────────────────────────────────────────────────────────────────
+
 app.listen(PORT, () => {
-  // console.log(`🚀 URL Preview API rodando em http://localhost:${PORT}`);
+  console.info(`🚀 URL Preview API rodando em http://localhost:${PORT}`);
 
   ensureChrome()
-    .then(() => { chromeReady = true; })
-    .catch((err) => { chromeError = err.message; });
+    .then(() => {
+      chromeReady = true;
+      console.info('[Chrome] Pronto.');
+    })
+    .catch((err) => {
+      chromeError = err.message;
+      console.error('[Chrome] Falha na inicialização:', err.message);
+    });
 });

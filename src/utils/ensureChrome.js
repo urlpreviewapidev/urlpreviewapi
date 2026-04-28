@@ -1,35 +1,38 @@
+// src/utils/ensureChrome.js
 import { execSync } from 'child_process';
 import { glob } from 'glob';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { PUPPETEER_CACHE_DIR, CHROME_GLOB, pickChromeBinary } from './puppeteerConfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '..', '..');
 
-const CHROME_GLOB = '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome';
-
 async function findChrome() {
   const matches = await glob(CHROME_GLOB);
-  return matches.find(p => !p.includes('sandbox') && !p.includes('wrapper')) ?? null;
+  return pickChromeBinary(matches);
 }
 
+/**
+ * Garante que o Chrome está disponível no cache do Puppeteer.
+ * Se não encontrar, executa o script de instalação do Puppeteer.
+ *
+ * @returns {Promise<string>} caminho absoluto do binário
+ */
 export async function ensureChrome() {
   let chromePath = await findChrome();
+  if (chromePath) return chromePath;
 
-  if (chromePath) {
-    // console.log('[Chrome] Encontrado em:', chromePath);
-    return chromePath;
-  }
+  console.log('[Chrome] Binário não encontrado — iniciando instalação...');
 
-  // console.log('[Chrome] Não encontrado. Baixando agora...');
   try {
     execSync('node node_modules/puppeteer/install.mjs', {
       cwd: ROOT,
       stdio: 'inherit',
       env: {
         ...process.env,
-        PUPPETEER_CACHE_DIR: '/opt/render/.cache/puppeteer',
+        PUPPETEER_CACHE_DIR,   // ← usa a constante centralizada
       },
     });
   } catch (err) {
@@ -38,8 +41,9 @@ export async function ensureChrome() {
   }
 
   chromePath = await findChrome();
-  if (!chromePath) throw new Error('[Chrome] Instalado mas binário não encontrado!');
+  if (!chromePath) {
+    throw new Error('[Chrome] Instalado mas binário não encontrado — verifique o CHROME_GLOB.');
+  }
 
-  // console.log('[Chrome] Pronto em:', chromePath);
   return chromePath;
 }
