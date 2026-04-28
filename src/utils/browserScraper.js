@@ -18,11 +18,11 @@ const DEFAULT_UA =
  * @returns {Promise<{title, description, image, favicon, siteName, locale, canonicalUrl, screenshot?}>}
  */
 export async function scrapeWithBrowser(url, options = {}) {
-  const executablePath = await getChromePath();
+  // const executablePath = await getChromePath();
 
-  if (executablePath === null) {
-    throw new Error('Chrome não encontrado no cache do Puppeteer');
-  }
+  // if (executablePath === null) {
+  //   throw new Error('Chrome não encontrado no cache do Puppeteer');
+  // }
 
   const {
     userAgent = DEFAULT_UA,
@@ -35,7 +35,8 @@ export async function scrapeWithBrowser(url, options = {}) {
   try {
     browser = await puppeteer.launch({
       headless: true,
-      ...(executablePath ? { executablePath } : {}),
+      // ...(executablePath ? { executablePath } : {}),
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',

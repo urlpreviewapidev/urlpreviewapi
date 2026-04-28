@@ -22,11 +22,11 @@ const DEFAULT_UA =
  * @returns {Promise<string>} data URI base64
  */
 export async function takeScreenshot(url, options = {}) {
-  const executablePath = await getChromePath();
+  // const executablePath = await getChromePath();
 
-  if (!executablePath) {
-    throw new Error('Chrome não encontrado — verifique getChromePath()');
-  }
+  // if (!executablePath) {
+  //   throw new Error('Chrome não encontrado — verifique getChromePath()');
+  // }
 
   const {
     userAgent = DEFAULT_UA,
@@ -41,7 +41,7 @@ export async function takeScreenshot(url, options = {}) {
   } = options;
 
   const browser = await puppeteer.launch({
-    executablePath,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
     headless: true,
     args: [
       '--no-sandbox',
