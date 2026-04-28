@@ -126,12 +126,15 @@ app.listen(PORT, () => {
   console.info(`🚀 URL Preview API rodando em http://localhost:${PORT}`);
 
   ensureChrome()
-    .then(() => {
+    .then((executablePath) => {
       chromeReady = true;
-      console.info('[Chrome] Pronto.');
+      // ← salva o path para usar no puppeteer.launch()
+      process.env.PUPPETEER_EXECUTABLE_PATH = executablePath;
+      console.info('[Chrome] ✅ Pronto:', executablePath);
     })
     .catch((err) => {
       chromeError = err.message;
-      console.error('[Chrome] Falha na inicialização:', err.message);
+      console.error('[Chrome] ❌ Falha:', err.message);
     });
 });
+
