@@ -7,7 +7,10 @@ import { fileURLToPath } from 'url';
 import { getPreview } from './preview.js';
 import { debugUrl } from './debug.js';
 import { ensureChrome } from './utils/ensureChrome.js';
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+
+puppeteer.use(StealthPlugin());
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -23,6 +23,8 @@
     "glob": "^13.0.6",
     "node-appwrite": "^24.0.0",
     "open-graph-scraper": "^6.11.0",
-    "puppeteer": "^24.42.0"
+    "puppeteer": "^24.42.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
   }
 }
