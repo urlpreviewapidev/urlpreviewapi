@@ -106,6 +106,40 @@ app.get('/debug-safe', async (req, res) => {
   res.json(results);
 });
 
+app.get('/debug-launch', async (req, res) => {
+  // Responde em no máximo 30s
+  const timer = setTimeout(() => {
+    if (!res.headersSent) res.status(504).json({ error: 'timeout após 30s' });
+  }, 30000);
+
+  try {
+    const browser = await puppeteer.launch({
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-zygote',
+        '--single-process',
+      ],
+    });
+
+    const version = await browser.version();
+    await browser.close();
+    clearTimeout(timer);
+    res.json({ success: true, version });
+
+  } catch (err) {
+    clearTimeout(timer);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      stack: err.stack?.split('\n').slice(0, 5),
+    });
+  }
+});
 
 // rota temporária de diagnóstico
 app.get('/debug-chrome-exec', async (req, res) => {
