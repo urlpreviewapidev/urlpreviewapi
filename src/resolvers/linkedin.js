@@ -2,10 +2,10 @@
 import axios from 'axios';
 import { scrapeWithBrowser } from '../utils/browserScraper.js';
 import { takeScreenshot } from '../utils/screenshotService.js';
+import { decodeHTMLEntities } from '../utils/decodeEntities.js'; // ✅ usa utilitário compartilhado
 
 const LINKEDIN_ICON = 'https://static.licdn.com/aero-v1/sc/h/al2o9zrvru7bnqekz8apd224h';
 
-// ✅ LinkedIn serve og:tags para esses UAs
 const SCRAPER_UAS = [
   'LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)',
   'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
@@ -30,7 +30,6 @@ function parseLinkedinUrl(url) {
       if (pathname.includes(pattern)) {
         const after = pathname.split(pattern)[1] ?? '';
         const rawSlug = after.split('/').filter(Boolean)[0] ?? '';
-        // ✅ Remove sufixo numérico longo do LinkedIn (ex: -975019228)
         const slug = rawSlug.replace(/-\d{6,}$/, '').replace(/-/g, ' ').trim();
         return { subtype, slug };
       }
@@ -60,17 +59,11 @@ function getFallbackTitle(subtype, slug) {
   return label;
 }
 
-function decodeHTMLEntities(str) {
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'");
+function cleanLinkedinTitle(title) {
+  if (!title) return null;
+  return title.replace(/\s+\d{6,}\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
 }
 
-// ✅ HTTP puro com UA de bot social — LinkedIn serve og:tags para LinkedInBot
 async function resolveViaHttpOg(url) {
   for (const ua of SCRAPER_UAS) {
     try {
@@ -98,9 +91,9 @@ async function resolveViaHttpOg(url) {
 
       if (ogImage || ogTitle) {
         return {
-          title: ogTitle ? decodeHTMLEntities(ogTitle) : null,
-          description: ogDesc ? decodeHTMLEntities(ogDesc) : null,
-          image: ogImage || null,
+          title:       ogTitle ? decodeHTMLEntities(ogTitle) : null,
+          description: ogDesc  ? decodeHTMLEntities(ogDesc)  : null,
+          image:       ogImage ? decodeHTMLEntities(ogImage) : null, // ✅ fix &amp; na URL
         };
       }
     } catch {
@@ -110,18 +103,12 @@ async function resolveViaHttpOg(url) {
   return {};
 }
 
-// ✅ Remove ID numérico do og:title do LinkedIn: "Nome Id — Cargo | LinkedIn"
-function cleanLinkedinTitle(title) {
-  if (!title) return null;
-  return title.replace(/\s+\d{6,}\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
-}
-
 async function resolveViaOembed(url) {
   const oembedUrl = `https://www.linkedin.com/oembed?url=${encodeURIComponent(url)}&format=json`;
   const { data } = await axios.get(oembedUrl, { timeout: 8000 });
   return {
     title: data.title || null,
-    image: data.thumbnail_url || null,
+    image: data.thumbnail_url ? decodeHTMLEntities(data.thumbnail_url) : null, // ✅ fix oEmbed também
   };
 }
 
@@ -145,9 +132,9 @@ export async function resolveLinkedin(url) {
   if (!title || !image) {
     try {
       const og = await resolveViaHttpOg(url);
-      title = title || og.title || null;
+      title = title || og.title       || null;
       description = description || og.description || null;
-      image = image || og.image || null;
+      image = image || og.image       || null;
     } catch (err) {
       console.warn('[LinkedIn] HTTP OG falhou:', err.message);
     }

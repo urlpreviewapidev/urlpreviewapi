@@ -1,0 +1,6 @@
+curl -s "https://urlpreviewapi.onrender.com/preview?url=https://www.linkedin.com/in/marcelo-r-borges-975019228/"
+curl -s "https://urlpreviewapi.onrender.com/preview?url=https://www.youtube.com/watch?v=b0eP3C8iV3k&list=RDb0eP3C8iV3k&start_radio=1"
+curl -s "https://urlpreviewapi.onrender.com/preview?url=https://github.com/urlpreviewapidev/urlpreviewapi"
+curl -s "https://urlpreviewapi.onrender.com/preview?url=https://uai-346a1a.netlify.app/"
+curl -s "https://urlpreviewapi.onrender.com/preview?url=https://www.instagram.com/thediscographix/"
+curl -s "https://urlpreviewapi.onrender.com/preview?url=https://www.tiktok.com/@marcelo.r..borges"
