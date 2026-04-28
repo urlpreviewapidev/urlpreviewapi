@@ -43,7 +43,7 @@ export async function resolveYoutube(url) {
     return {
       type: 'youtube',
       title: snippet.title,
-      description: snippet.description?.slice(0, 300) || null,
+      description: videoData.description?.slice(0, 300) || null,
       image:
         snippet.thumbnails?.maxres?.url ||
         snippet.thumbnails?.high?.url ||
