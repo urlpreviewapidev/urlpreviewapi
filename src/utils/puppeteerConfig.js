@@ -1,11 +1,20 @@
 // src/utils/puppeteerConfig.js
 import os from 'os';
+import fs from 'fs';
 
+// Candidatos em ordem de prioridade
+const CACHE_CANDIDATES = [
+  process.env.PUPPETEER_CACHE_DIR,
+  '/opt/render/.cache/puppeteer',       // Render.com
+  '/opt/.cache/puppeteer',              // Render.com alternativo
+  `${os.homedir()}/.cache/puppeteer`,   // local / outros
+];
+
+// Usa o primeiro que já existe no disco, ou o primeiro definido
 export const PUPPETEER_CACHE_DIR =
+  CACHE_CANDIDATES.find(p => p && fs.existsSync(p)) ||
   process.env.PUPPETEER_CACHE_DIR ||
-  (process.env.RENDER
-    ? '/opt/render/.cache/puppeteer'
-    : `${os.homedir()}/.cache/puppeteer`);
+  `${os.homedir()}/.cache/puppeteer`;
 
 export const CHROME_GLOB =
   `${PUPPETEER_CACHE_DIR}/chrome/linux-*/chrome-linux64/chrome`;
