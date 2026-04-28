@@ -62,6 +62,51 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', chromeReady });
 });
 
+app.get('/debug-safe', async (req, res) => {
+  const { execSync } = await import('child_process');
+  const fs = await import('fs');
+  const results = {};
+
+  const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+
+  // 1. Arquivo existe e permissões
+  try {
+    const stat = fs.statSync(chromePath);
+    results.exists = true;
+    results.mode = stat.mode.toString(8);
+    results.size_mb = (stat.size / 1024 / 1024).toFixed(2) + ' MB';
+  } catch (e) {
+    results.exists = false;
+    results.stat_error = e.message;
+  }
+
+  // 2. ldd — verifica dependências faltando (não executa o Chrome)
+  try {
+    results.ldd = execSync(`ldd "${chromePath}" 2>&1 | grep "not found"`, {
+      timeout: 5000,
+    }).toString().trim() || 'all libs found ✅';
+  } catch (e) {
+    results.ldd = e.stdout?.toString() || 'all libs found ✅';
+  }
+
+  // 3. Memória disponível
+  try {
+    results.memory = execSync('free -m', { timeout: 3000 }).toString().trim();
+  } catch (e) {
+    results.memory_error = e.message;
+  }
+
+  // 4. Espaço em disco
+  try {
+    results.disk = execSync('df -h /opt/render', { timeout: 3000 }).toString().trim();
+  } catch (e) {
+    results.disk_error = e.message;
+  }
+
+  res.json(results);
+});
+
+
 // rota temporária de diagnóstico
 app.get('/debug-chrome-exec', async (req, res) => {
   const chromePath = '/opt/render/.cache/puppeteer/chrome/linux-147.0.7727.57/chrome-linux64/chrome';
@@ -94,9 +139,24 @@ app.get('/debug-chrome-exec', async (req, res) => {
   // 4. Tenta puppeteer.launch()
   try {
     const browser = await puppeteer.launch({
-      executablePath: chromePath,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      headless: true,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-zygote',
+        '--single-process',             // ← usa 1 processo só, economiza RAM
+        '--memory-pressure-off',
+        '--max_old_space_size=256',     // ← limita heap do V8 do Chrome
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--disable-sync',
+        '--no-first-run',
+        '--disable-translate',
+      ],
     });
     results.launch = 'success';
     await browser.close();

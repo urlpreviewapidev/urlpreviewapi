@@ -35,17 +35,24 @@ export async function scrapeWithBrowser(url, options = {}) {
   try {
     const browser = await puppeteer.launch({
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-      headless: true,
+      headless: 'new',
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',      // ← crítico no Render (pouca /dev/shm)
+        '--disable-dev-shm-usage',
         '--disable-gpu',
-        '--no-zygote',                  // ← evita crash em containers
-        '--single-process',             // ← fallback se --no-zygote falhar
+        '--no-zygote',
+        '--single-process',             // ← usa 1 processo só, economiza RAM
+        '--memory-pressure-off',
+        '--max_old_space_size=256',     // ← limita heap do V8 do Chrome
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--disable-sync',
+        '--no-first-run',
+        '--disable-translate',
       ],
     });
-
 
     const page = await browser.newPage();
     await page.setUserAgent(userAgent);
