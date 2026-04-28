@@ -123,6 +123,7 @@ function formatDocument(doc) {
 
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 dias
 
+// ─── findByUrl — com limpeza de cache expirado ───────────────────────────────
 export async function findByUrl(url) {
   const result = await databases.listDocuments(DATABASE_ID, COLLECTION_ID,
     [Query.equal('url', url), Query.limit(1)]
@@ -134,12 +135,16 @@ export async function findByUrl(url) {
   const age = Date.now() - new Date(doc.$createdAt).getTime();
 
   if (age > CACHE_TTL_MS) {
-    console.log(`[Cache] Expirado → ${url}`);
+    console.log(`[Cache] Expirado → deletando ${doc.$id}`);
+    // ✅ Deleta em background, não bloqueia a resposta
+    databases.deleteDocument(DATABASE_ID, COLLECTION_ID, doc.$id)
+      .catch(err => console.error('[Cache] Erro ao deletar expirado:', err.message));
     return null;
   }
 
   return formatDocument(doc);
 }
+
 
 export async function uploadImage(imageData, label = 'preview') {
   if (!imageData) return { fileId: null, imageUrl: null };
@@ -170,16 +175,24 @@ export async function uploadImage(imageData, label = 'preview') {
   }
 }
 
+// ─── createPreview — preserva image_url original se upload falhar ────────────
 export async function createPreview(scraperData, imageData) {
-  const { fileId, imageUrl } = await uploadImage(
-    imageData,
-    scraperData.url?.replace(/[^a-z0-9]/gi, '_').slice(0, 40) ?? 'preview'
-  );
+  const label = scraperData.url?.replace(/[^a-z0-9]/gi, '_').slice(0, 40) ?? 'preview';
+  const { fileId, imageUrl } = await uploadImage(imageData, label);
 
   const doc = buildDocument(scraperData);
 
   if (fileId) doc.image_file_id = fileId;
-  if (imageUrl) doc.image_url = imageUrl;
+
+  if (imageUrl) {
+    // ✅ Upload funcionou — usa a URL do Appwrite Storage
+    doc.image_url = imageUrl;
+  } else if (imageData && !imageData.startsWith('data:')) {
+    // ✅ Upload falhou MAS era uma URL externa — preserva a URL original
+    // (melhor ter a URL externa do que nada)
+    doc.image_url = imageData;
+    console.warn(`[createPreview] Upload falhou, usando URL externa: ${imageData}`);
+  }
 
   const created = await databases.createDocument(
     DATABASE_ID,

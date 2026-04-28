@@ -1,14 +1,19 @@
+// src/utils/ogScraper.js
 import ogs from 'open-graph-scraper';
+
+const TIMEOUT_MS = 10_000;
 
 export async function tryOpenGraph(url) {
   try {
+    // ✅ ogs v6+: timeout via AbortSignal dentro de fetchOptions
     const { result } = await ogs({
       url,
-      timeout: 10000,
       fetchOptions: {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; URLPreviewBot/1.0)' },
+        signal: AbortSignal.timeout(TIMEOUT_MS), // ✅ era: timeout: 10000 no root (ignorado)
       },
     });
+
     return {
       title: result.ogTitle || result.twitterTitle || null,
       description: result.ogDescription || result.twitterDescription || null,

@@ -7,10 +7,10 @@ import { fileURLToPath } from 'url';
 import { getPreview } from './preview.js';
 import { debugUrl } from './debug.js';
 import { ensureChrome } from './utils/ensureChrome.js';
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 
-puppeteer.use(StealthPlugin());
+// ✅ Removido: import puppeteer + StealthPlugin daqui
+// Stealth agora é configurado em puppeteerInstance.js, usado por todos
+import './utils/puppeteerInstance.js'; // inicializa o plugin uma vez
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,9 +33,14 @@ const debugLimiter = rateLimit({
   message: { error: 'Limite de requisições de debug atingido.' },
 });
 
+// ✅ Aceita URLs com ou sem protocolo (consistente com normalizeUrl)
 function isValidUrl(str) {
+  if (!str || typeof str !== 'string') return false;
+  const withProtocol = /^https?:\/\//i.test(str.trim())
+    ? str.trim()
+    : `https://${str.trim()}`;
   try {
-    const { protocol } = new URL(str);
+    const { protocol } = new URL(withProtocol);
     return protocol === 'http:' || protocol === 'https:';
   } catch {
     return false;
@@ -57,7 +62,7 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', chromeReady, chromeError });
 });
 
-// ─── Debug seguro (sem executar Chrome) ──────────────────────────────────────
+// ─── Debug seguro ─────────────────────────────────────────────────────────────
 
 app.get('/debug-safe', async (req, res) => {
   const { execSync } = await import('child_process');
@@ -98,9 +103,12 @@ app.get('/debug-safe', async (req, res) => {
 // ─── Debug launch ─────────────────────────────────────────────────────────────
 
 app.get('/debug-launch', async (req, res) => {
+  // ✅ importa a instância centralizada (com stealth)
+  const puppeteer = (await import('./utils/puppeteerInstance.js')).default;
+
   const timer = setTimeout(() => {
     if (!res.headersSent) res.status(504).json({ error: 'timeout após 30s' });
-  }, 30000);
+  }, 30_000);
 
   try {
     const browser = await puppeteer.launch({
@@ -112,7 +120,7 @@ app.get('/debug-launch', async (req, res) => {
         '--disable-dev-shm-usage',
         '--disable-gpu',
         '--no-zygote',
-        '--single-process',
+        // ✅ removido --single-process (incompatível com --no-zygote)
       ],
     });
 

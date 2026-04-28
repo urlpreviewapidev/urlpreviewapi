@@ -1,41 +1,46 @@
 // src/utils/browserScraper.js
-import puppeteer from 'puppeteer';
+import puppeteer from './puppeteerInstance.js'; // ✅ era: import puppeteer from 'puppeteer'
 
 const DEFAULT_UA =
   'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
 
-/**
- * Abre um browser headless e extrai meta tags da página.
- *
- * @param {string} url
- * @param {object} [options]
- * @param {string}  [options.userAgent]
- * @param {number}  [options.timeout=15000]
- * @param {'networkidle2'|'networkidle0'|'domcontentloaded'|'load'} [options.waitUntil]
- * @param {boolean} [options.takeScreenshot=false]
- * @returns {Promise<{title, description, image, favicon, siteName, locale, canonicalUrl, screenshot?}>}
- */
+// ✅ Flag compartilhada para evitar double-close
+function makeBrowserGuard() {
+  let _browser = null;
+  let _closed = false;
+
+  return {
+    set(b) { _browser = b; _closed = false; },
+    async close() {
+      if (_closed || !_browser) return;
+      _closed = true;
+      await _browser.close().catch(() => { });
+      _browser = null;
+    },
+    get alive() { return !!_browser && !_closed; },
+  };
+}
+
 export async function scrapeWithBrowser(url, options = {}) {
   const {
     userAgent = DEFAULT_UA,
     timeout = 15_000,
-    waitUntil = 'domcontentloaded', // ← era 'networkidle2' — trava em TikTok/Instagram
+    waitUntil = 'domcontentloaded',
     takeScreenshot: shouldScreenshot = false,
   } = options;
 
-  let browser = null; // ✅ let aqui, sem redeclarar no try
+  const guard = makeBrowserGuard();
 
-  const killTimer = setTimeout(async () => {
-    if (browser) {
-      console.warn('[browserScraper] ⏱ Kill timer ativado — forçando browser.close()');
-      await browser.close().catch(() => { });
-      browser = null;
+  // ✅ Kill timer síncrono — sem async/await
+  const killTimer = setTimeout(() => {
+    if (guard.alive) {
+      console.warn('[browserScraper] ⏱ Kill timer — forçando close()');
+      guard.close(); // fire-and-forget intencional aqui, mas sem double-close
     }
   }, timeout + 5_000);
 
   try {
-    // ✅ atribui ao `let` do escopo externo (sem `const` aqui)
-    browser = await puppeteer.launch({
+    const browser = await puppeteer.launch({
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
       headless: 'new',
       args: [
@@ -43,8 +48,7 @@ export async function scrapeWithBrowser(url, options = {}) {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
-        '--no-zygote',
-        '--single-process',
+        '--no-zygote',        // ✅ removido --single-process (incompatível)
         '--memory-pressure-off',
         '--max_old_space_size=256',
         '--disable-extensions',
@@ -56,9 +60,10 @@ export async function scrapeWithBrowser(url, options = {}) {
       ],
     });
 
+    guard.set(browser);
+
     const page = await browser.newPage();
 
-    // ── Aborta recursos desnecessários ─────────────────────────────────
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       if (['media', 'font', 'websocket'].includes(req.resourceType())) {
@@ -76,7 +81,6 @@ export async function scrapeWithBrowser(url, options = {}) {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     });
 
-    // ── Navegação tolerante a timeout ──────────────────────────────────
     try {
       await page.goto(url, { waitUntil, timeout });
     } catch (err) {
@@ -87,7 +91,6 @@ export async function scrapeWithBrowser(url, options = {}) {
       }
     }
 
-    // ── Extração de meta tags ──────────────────────────────────────────
     const meta = await page.evaluate(() => {
       const getMeta = (selectors) => {
         for (const sel of selectors) {
@@ -97,12 +100,10 @@ export async function scrapeWithBrowser(url, options = {}) {
         }
         return null;
       };
-
       return {
         title:
           getMeta(['meta[property="og:title"]', 'meta[name="twitter:title"]']) ||
-          document.title ||
-          null,
+          document.title || null,
         description:
           getMeta([
             'meta[property="og:description"]',
@@ -126,19 +127,13 @@ export async function scrapeWithBrowser(url, options = {}) {
         locale: getMeta(['meta[property="og:locale"]']) || null,
         canonicalUrl:
           getMeta(['link[rel="canonical"]']) ||
-          getMeta(['meta[property="og:url"]']) ||
-          null,
+          getMeta(['meta[property="og:url"]']) || null,
       };
     });
 
-    // ── Screenshot opcional ────────────────────────────────────────────
     if (shouldScreenshot && !meta.image) {
       try {
-        const raw = await page.screenshot({
-          type: 'jpeg',
-          quality: 85,
-          encoding: 'base64',
-        });
+        const raw = await page.screenshot({ type: 'jpeg', quality: 85, encoding: 'base64' });
         meta.screenshot = `data:image/jpeg;base64,${raw}`;
       } catch (err) {
         console.warn('[browserScraper] Screenshot falhou:', err.message);
@@ -148,7 +143,7 @@ export async function scrapeWithBrowser(url, options = {}) {
     return meta;
 
   } finally {
-    clearTimeout(killTimer);
-    if (browser) await browser.close().catch(() => { });
+    clearTimeout(killTimer); // ✅ cancela kill timer ANTES de fechar
+    await guard.close();     // ✅ idempotente — só fecha se ainda não fechou
   }
 }

@@ -4,16 +4,17 @@ import { scrapeWithBrowser } from '../utils/browserScraper.js';
 import { takeScreenshot } from '../utils/screenshotService.js';
 
 const GITHUB_ICON = 'https://github.githubassets.com/favicons/favicon.svg';
-const GITHUB_HEADERS = { 'User-Agent': 'url-preview-api' };
 
-if (process.env.GITHUB_TOKEN) {
-  GITHUB_HEADERS['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+// ✅ Função lazy — lê o token no momento da chamada, não no import
+function getGithubHeaders() {
+  const headers = { 'User-Agent': 'url-preview-api' };
+  if (process.env.GITHUB_TOKEN) {
+    headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+  }
+  return headers;
 }
 
-// ── OG image pública do GitHub (sem Puppeteer) ────────────────────────────
 function getOgImage(owner, repo = null) {
-  // https://opengraph.githubassets.com/<hash>/<owner>/<repo>
-  // O hash não importa — qualquer valor funciona para exibição
   if (repo) return `https://opengraph.githubassets.com/1/${owner}/${repo}`;
   return `https://avatars.githubusercontent.com/${owner}?s=400`;
 }
@@ -33,57 +34,55 @@ function parseGithubUrl(url) {
 }
 
 async function resolveRepo(owner, repo, url) {
-  const apiUrl = `https://api.github.com/repos/${owner}/${repo}`;
-  const { data } = await axios.get(apiUrl, {
-    headers: GITHUB_HEADERS,
+  const { data } = await axios.get(`https://api.github.com/repos/${owner}/${repo}`, {
+    headers: getGithubHeaders(), // ✅ lê token no momento da chamada
     timeout: 8000,
   });
 
   return {
     type: 'github',
-    title: data.full_name,
+    title: data.full_name || `${owner}/${repo}`,
     description: data.description?.slice(0, 400) || null,
-    image: getOgImage(owner, repo),   // ✅ OG image estável, sem Puppeteer
+    image: getOgImage(owner, repo),
     icon: GITHUB_ICON,
-    url: data.html_url,
+    url: data.html_url || url,
     extra: {
       siteName: 'GitHub',
-      owner: data.owner?.login,
-      repo: data.name,
+      owner: data.owner?.login || owner,
+      repo: data.name || repo,
       stars: data.stargazers_count,
       forks: data.forks_count,
       watchers: data.watchers_count,
-      language: data.language,
+      language: data.language || null,
       topics: data.topics?.slice(0, 8) || [],
       isPrivate: data.private,
       isFork: data.fork,
       openIssues: data.open_issues_count,
       license: data.license?.spdx_id || null,
-      defaultBranch: data.default_branch,
-      pushedAt: data.pushed_at,
-      createdAt: data.created_at,
+      defaultBranch: data.default_branch || null,
+      pushedAt: data.pushed_at || null,
+      createdAt: data.created_at || null,
     },
   };
 }
 
 async function resolveProfile(owner, url) {
-  const apiUrl = `https://api.github.com/users/${owner}`;
-  const { data } = await axios.get(apiUrl, {
-    headers: GITHUB_HEADERS,
+  const { data } = await axios.get(`https://api.github.com/users/${owner}`, {
+    headers: getGithubHeaders(), // ✅ lê token no momento da chamada
     timeout: 8000,
   });
 
   return {
     type: 'github',
-    title: data.name || data.login,
+    title: data.name || data.login || owner,
     description: data.bio?.slice(0, 400) || null,
-    image: getOgImage(owner),   // ✅ avatar via githubusercontent
+    image: getOgImage(owner),
     icon: GITHUB_ICON,
-    url: data.html_url,
+    url: data.html_url || url,
     extra: {
       siteName: 'GitHub',
       username: data.login,
-      avatarUrl: data.avatar_url,
+      avatarUrl: data.avatar_url || null,
       company: data.company || null,
       location: data.location || null,
       blog: data.blog || null,
@@ -118,9 +117,9 @@ export async function resolveGithub(url) {
     const browser = await scrapeWithBrowser(url, { takeScreenshot: true }).catch(() => ({}));
     return {
       type: 'github',
-      title: browser.title || `${owner}${repo ? `/${repo}` : ''} - GitHub`,
+      title: browser.title || `${owner}${repo ? `/${repo}` : ''} — GitHub`,
       description: browser.description?.slice(0, 400) || null,
-      image: browser.screenshot || getOgImage(owner, repo),  // ✅ fallback OG
+      image: browser.screenshot || getOgImage(owner, repo ?? undefined),
       icon: GITHUB_ICON,
       url,
       extra: { siteName: 'GitHub' },

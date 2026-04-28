@@ -1,3 +1,4 @@
+// src/resolvers/youtube.js
 import axios from 'axios';
 import { extractYoutubeVideoId, getFaviconUrl, parseISODuration } from '../utils/detectSource.js';
 
@@ -8,15 +9,16 @@ async function resolveYoutubeOembed(url) {
 
   return {
     type: 'youtube',
-    title: data.title,
+    title: data.title || null,
     description: null,
     image: data.thumbnail_url || (videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : null),
     icon: getFaviconUrl(url),
     url,
     extra: {
+      siteName: 'YouTube',
       videoId,
-      channel: data.author_name,
-      channelUrl: data.author_url,
+      channel: data.author_name || null,
+      channelUrl: data.author_url || null,
       duration: null,
     },
   };
@@ -42,22 +44,22 @@ export async function resolveYoutube(url) {
 
     return {
       type: 'youtube',
-      title: snippet.title,
-      description: videoData.description?.slice(0, 300) || null,
+      title: snippet.title || null,
+      description: snippet.description?.slice(0, 300) || null, // ✅ era `videoData` — ReferenceError
       image:
         snippet.thumbnails?.maxres?.url ||
         snippet.thumbnails?.high?.url ||
         snippet.thumbnails?.medium?.url ||
-        null,
+        (videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : null),
       icon: getFaviconUrl(url),
       url,
       extra: {
-        siteName: 'YouTube', // ← adiciona hardcoded
+        siteName: 'YouTube',
         videoId,
-        channel: snippet.channelTitle,
-        channelId: snippet.channelId,
+        channel: snippet.channelTitle || null,
+        channelId: snippet.channelId || null,
         duration: parseISODuration(details.duration),
-        publishedAt: snippet.publishedAt,
+        publishedAt: snippet.publishedAt || null,
         tags: snippet.tags?.slice(0, 5) || [],
       },
     };
