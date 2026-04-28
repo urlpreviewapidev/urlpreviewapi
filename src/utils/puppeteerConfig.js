@@ -5,9 +5,9 @@ import fs from 'fs';
 // Candidatos em ordem de prioridade
 const CACHE_CANDIDATES = [
   process.env.PUPPETEER_CACHE_DIR,
-  '/opt/render/.cache/puppeteer',       // Render.com
-  '/opt/.cache/puppeteer',              // Render.com alternativo
-  `${os.homedir()}/.cache/puppeteer`,   // local / outros
+  '/opt/render/project/.cache/puppeteer',   // ← dentro do projeto, persiste!
+  '/opt/render/.cache/puppeteer',
+  `${os.homedir()}/.cache/puppeteer`,
 ];
 
 // Usa o primeiro que já existe no disco, ou o primeiro definido
