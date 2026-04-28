@@ -27,7 +27,6 @@ function resolveIcon(favicon, pageUrl) {
   }
 }
 
-// ✅ Resolve imagem relativa contra o SITE sendo scrapeado, não o BASE_URL
 function resolveImage(rawImage, pageUrl, screenshotData) {
   if (!rawImage) return screenshotData || null;
   if (rawImage.startsWith('http')) return rawImage;
@@ -44,8 +43,15 @@ export async function resolveGeneric(url, type = 'generic') {
   let screenshotData = null;
   let browserData = {};
 
-  if (!ogData.title || !ogData.image) {
-    browserData = await scrapeWithBrowser(url, { takeScreenshot: !ogData.image }).catch(() => ({}));
+  // ✅ Fix: entra no browser se QUALQUER campo estiver faltando (title OU image)
+  // antes era `&&` implícito porque o título satisfazia a condição mas image era ignorada
+  const needsBrowser = !ogData.title || !ogData.image;
+
+  if (needsBrowser) {
+    browserData = await scrapeWithBrowser(url, {
+      // ✅ Tira screenshot no browser se ainda não temos imagem
+      takeScreenshot: !ogData.image,
+    }).catch(() => ({}));
 
     if (browserData.screenshot) {
       screenshotData = browserData.screenshot;
@@ -53,15 +59,11 @@ export async function resolveGeneric(url, type = 'generic') {
     }
   }
 
-  // ✅ ogData como primary (mais confiável), browserData como fallback
   const merged = merge(ogData, browserData);
-
-  // ✅ Fallback gracioso — sem lançar erro
   const title = merged.title || new URL(url).hostname;
-
-  // ✅ Resolve imagem contra o site, não o BASE_URL local
   let image = resolveImage(merged.image, url, screenshotData);
 
+  // ✅ Screenshot dedicado como último recurso (quando browser não tirou)
   if (!image) {
     image = await takeScreenshot(url).catch(() => null);
   }

@@ -4,28 +4,42 @@ import { scrapeWithBrowser } from '../utils/browserScraper.js';
 import { takeScreenshot } from '../utils/screenshotService.js';
 
 const TIKTOK_ICON = 'https://www.tiktok.com/favicon.ico';
-const RESOLVE_TIMEOUT_MS = 25_000; // ✅ aumentado para cobrir pior caso real (8+10+3s de overhead)
+const RESOLVE_TIMEOUT_MS = 25_000;
+
+// ✅ Títulos inúteis retornados pelo TikTok para bots
+const USELESS_TITLES = new Set([
+  'tiktok',
+  'www.tiktok.com',
+  'tiktok - make your day',
+  'log in | tiktok',
+  'log in or sign up for tiktok',
+]);
 
 function parseTiktokUrl(url) {
   try {
     const { pathname } = new URL(url);
     const videoMatch = pathname.match(/\/@([\w.]+)\/video\/(\d+)/);
     if (videoMatch) return { subtype: 'video', username: videoMatch[1], videoId: videoMatch[2] };
-
     const profileMatch = pathname.match(/\/@([\w.]+)/);
     if (profileMatch) return { subtype: 'profile', username: profileMatch[1], videoId: null };
-
     return { subtype: 'generic', username: null, videoId: null };
   } catch {
     return { subtype: 'generic', username: null, videoId: null };
   }
 }
 
+function sanitizeTitle(title) {
+  if (!title) return null;
+  const cleaned = title.trim();
+  if (USELESS_TITLES.has(cleaned.toLowerCase())) return null;
+  return cleaned;
+}
+
 async function resolveViaOembed(url, signal) {
   const oembedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`;
   const { data } = await axios.get(oembedUrl, {
     timeout: 8_000,
-    signal, // ✅ AbortSignal propagado — cancela se o global expirar
+    signal,
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)' },
   });
   return {
@@ -35,14 +49,49 @@ async function resolveViaOembed(url, signal) {
   };
 }
 
-// ✅ withTimeout agora propaga AbortController para cancelar promises internas
+// ✅ HTTP OG para perfis — TikTok serve og:tags para alguns UAs
+async function resolveViaHttpOg(url) {
+  const UAS = [
+    'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+    'Twitterbot/1.0',
+    'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+  ];
+
+  for (const ua of UAS) {
+    try {
+      const { data: html } = await axios.get(url, {
+        timeout: 8_000,
+        headers: {
+          'User-Agent': ua,
+          'Accept': 'text/html',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        maxContentLength: 2 * 1024 * 1024,
+      });
+
+      const ogImage = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)?.[1]
+        || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)?.[1]
+        || null;
+
+      const ogTitle = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1]
+        || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i)?.[1]
+        || null;
+
+      const cleanTitle = sanitizeTitle(ogTitle);
+      if (ogImage || cleanTitle) {
+        return { title: cleanTitle, image: ogImage || null };
+      }
+    } catch {
+      // tenta próximo UA
+    }
+  }
+  return {};
+}
+
 function createAbortableTimeout(ms) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`Timeout (${ms}ms)`)), ms);
-  return {
-    signal: controller.signal,
-    clear: () => clearTimeout(timer),
-  };
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
 async function _resolveTiktok(url, signal) {
@@ -54,14 +103,14 @@ async function _resolveTiktok(url, signal) {
   let authorName = username ?? null;
 
   if (subtype === 'video') {
-    // ── 1. oEmbed ──────────────────────────────────────────────────────────
+    // ── 1. oEmbed ─────────────────────────────────────────────────────────
     try {
-      const oembed = await resolveViaOembed(url, signal); // ✅ sinal propagado
-      title = oembed.title ?? null;
+      const oembed = await resolveViaOembed(url, signal);
+      title = sanitizeTitle(oembed.title);
       image = oembed.image ?? null;
       authorName = oembed.authorName ?? username ?? null;
     } catch (err) {
-      if (err.name === 'AbortError' || signal?.aborted) throw err; // ✅ propaga abort
+      if (err.name === 'AbortError' || signal?.aborted) throw err;
       console.warn('[TikTok] oEmbed falhou:', err.message);
     }
 
@@ -69,7 +118,7 @@ async function _resolveTiktok(url, signal) {
     if (!title || !image) {
       try {
         const browser = await scrapeWithBrowser(url);
-        title = title || browser.title || null;
+        title = title || sanitizeTitle(browser.title) || null;
         description = description || browser.description?.slice(0, 400) || null;
         if (!image && browser.image?.startsWith('http')) image = browser.image;
       } catch (err) {
@@ -78,31 +127,49 @@ async function _resolveTiktok(url, signal) {
       }
     }
 
-    // ── 3. Screenshot (último recurso) ────────────────────────────────────
+    // ── 3. Screenshot ──────────────────────────────────────────────────────
     if (!image) {
       image = await takeScreenshot(url, {
         waitUntil: 'domcontentloaded',
-        timeout: 8_000,             // ✅ reduzido de 10_000 — soma controlada
+        timeout: 8_000,
       }).catch(() => null);
     }
 
   } else if (subtype === 'profile') {
+    // ── 1. HTTP OG (mais leve — tenta primeiro) ────────────────────────────
     try {
+      const og = await resolveViaHttpOg(url);
+      title = sanitizeTitle(og.title) || null;
+      image = og.image || null;
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      console.warn('[TikTok] HTTP OG falhou:', err.message);
+    }
+
+    // ── 2. oEmbed para perfis (endpoint não-oficial — às vezes funciona) ──
+    if (!image) {
+      try {
+        const oembed = await resolveViaOembed(url, signal);
+        title = title || sanitizeTitle(oembed.title) || null;
+        image = image || oembed.image || null;
+        authorName = oembed.authorName ?? username ?? null;
+      } catch (err) {
+        if (err.name === 'AbortError' || signal?.aborted) throw err;
+        // esperado falhar para perfis
+      }
+    }
+
+    // ── 3. Screenshot (último recurso) ────────────────────────────────────
+    if (!image) {
       image = await takeScreenshot(url, {
         waitUntil: 'domcontentloaded',
         timeout: 10_000,
         waitAfterLoad: 1_500,
-      });
-    } catch (err) {
-      if (signal?.aborted) throw err;
-      console.warn('[TikTok] Screenshot de perfil falhou:', err.message);
-      image = null;
+      }).catch(() => null);
     }
-
-    title = username ? `@${username} no TikTok` : 'TikTok';
-    authorName = username ?? null;
   }
 
+  // ── Fallback de título ─────────────────────────────────────────────────────
   if (!title) title = username ? `@${username} no TikTok` : 'TikTok';
 
   return {
@@ -127,7 +194,7 @@ export async function resolveTiktok(url) {
 
   try {
     const result = await _resolveTiktok(url, signal);
-    clear(); // ✅ limpa o timer se terminou antes do timeout
+    clear();
     return result;
   } catch (err) {
     clear();

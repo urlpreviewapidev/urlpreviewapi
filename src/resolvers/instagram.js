@@ -5,25 +5,31 @@ import { takeScreenshot } from '../utils/screenshotService.js';
 
 const IG_ICON = 'https://www.google.com/s2/favicons?domain=www.instagram.com&sz=64';
 
-// ✅ UAs que o Instagram ainda serve og:tags (crawlers de redes sociais)
 const SCRAPER_UAS = [
   'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
   'Twitterbot/1.0',
   'LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)',
 ];
 
+// ✅ Títulos inúteis que o Instagram retorna para bots — descartados
+const USELESS_TITLES = new Set([
+  'www.instagram.com',
+  'instagram.com',
+  'instagram',
+  'log into facebook',
+  'facebook',
+  'log in or sign up to view',
+]);
+
 function parseInstagramUrl(url) {
   try {
     const { pathname } = new URL(url);
-
     const postMatch = pathname.match(/\/(p|reel)\/([A-Za-z0-9_-]+)/);
     if (postMatch) return { subtype: 'post', username: null, postId: postMatch[2], isProfile: false };
-
     const profileMatch = pathname.match(/^\/?@?([\w.]+)\/?$/);
     if (profileMatch && profileMatch[1] !== 'p' && profileMatch[1] !== 'reel') {
       return { subtype: 'profile', username: profileMatch[1], postId: null, isProfile: true };
     }
-
     return { subtype: 'generic', username: null, postId: null, isProfile: false };
   } catch {
     return { subtype: 'generic', username: null, postId: null, isProfile: false };
@@ -40,7 +46,26 @@ async function resolveViaOembed(url) {
   };
 }
 
-// ✅ HTTP puro com UA de bot social — Instagram serve og:tags para esses UAs
+function decodeHTMLEntities(str) {
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'");
+}
+
+// ✅ Retorna null se o título for inútil (hostname, login wall, etc.)
+function sanitizeTitle(title) {
+  if (!title) return null;
+  const cleaned = decodeHTMLEntities(title).trim();
+  if (USELESS_TITLES.has(cleaned.toLowerCase())) return null;
+  // Rejeita títulos que são apenas uma URL/domínio
+  if (/^[\w.-]+\.(com|net|org|io|co)$/i.test(cleaned)) return null;
+  return cleaned;
+}
+
 async function resolveViaHttpOg(url) {
   for (const ua of SCRAPER_UAS) {
     try {
@@ -54,7 +79,6 @@ async function resolveViaHttpOg(url) {
         maxContentLength: 2 * 1024 * 1024,
       });
 
-      // Extrai og:tags via regex — sem cheerio para manter leve
       const ogImage = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)?.[1]
         || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)?.[1]
         || null;
@@ -67,9 +91,11 @@ async function resolveViaHttpOg(url) {
         || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']/i)?.[1]
         || null;
 
-      if (ogImage || ogTitle) {
+      const cleanTitle = sanitizeTitle(ogTitle);
+
+      if (ogImage || cleanTitle) {
         return {
-          title: ogTitle ? decodeHTMLEntities(ogTitle) : null,
+          title: cleanTitle,
           description: ogDesc ? decodeHTMLEntities(ogDesc) : null,
           image: ogImage || null,
         };
@@ -81,16 +107,6 @@ async function resolveViaHttpOg(url) {
   return {};
 }
 
-function decodeHTMLEntities(str) {
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'");
-}
-
 export async function resolveInstagram(url) {
   const { subtype, username, postId, isProfile } = parseInstagramUrl(url);
 
@@ -99,7 +115,7 @@ export async function resolveInstagram(url) {
   let image = null;
   let resolvedUsername = username;
 
-  // ── 1. oEmbed (só para posts com token) ───────────────────────────────────
+  // ── 1. oEmbed (só posts com token) ────────────────────────────────────────
   if (subtype === 'post' && process.env.FB_ACCESS_TOKEN) {
     try {
       const oembed = await resolveViaOembed(url);
@@ -111,10 +127,11 @@ export async function resolveInstagram(url) {
     }
   }
 
-  // ── 2. HTTP + UA social (funciona melhor que Puppeteer no Instagram) ───────
+  // ── 2. HTTP + UA social ───────────────────────────────────────────────────
   if (!title || !image) {
     try {
       const og = await resolveViaHttpOg(url);
+      // ✅ sanitizeTitle já foi aplicado dentro do resolveViaHttpOg
       title = title || og.title || null;
       description = description || og.description || null;
       image = image || og.image || null;
@@ -123,11 +140,12 @@ export async function resolveInstagram(url) {
     }
   }
 
-  // ── 3. Browser scraping (último recurso — frequentemente bloqueado) ────────
+  // ── 3. Browser scraping ───────────────────────────────────────────────────
   if (!title || !image) {
     try {
       const browser = await scrapeWithBrowser(url, { takeScreenshot: !image });
-      title = title || browser.title || null;
+      const browserTitle = sanitizeTitle(browser.title);
+      title = title || browserTitle || null;
       description = description || browser.description?.slice(0, 400) || null;
       image = image || browser.screenshot || (browser.image?.startsWith('http') ? browser.image : null);
     } catch (err) {
