@@ -41,17 +41,18 @@ export async function takeScreenshot(url, options = {}) {
   } = options;
 
   const browser = await puppeteer.launch({
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
     headless: true,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
+      '--disable-dev-shm-usage',      // ← crítico no Render (pouca /dev/shm)
       '--disable-gpu',
-      '--single-process',
-      '--disable-blink-features=AutomationControlled', // ✅ reduz detecção de bot
+      '--no-zygote',                  // ← evita crash em containers
+      '--single-process',             // ← fallback se --no-zygote falhar
     ],
   });
+
 
   try {
     const page = await browser.newPage();

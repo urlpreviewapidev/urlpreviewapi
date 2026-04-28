@@ -62,6 +62,52 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', chromeReady });
 });
 
+// rota temporária de diagnóstico
+app.get('/debug-chrome-exec', async (req, res) => {
+  const chromePath = '/opt/render/.cache/puppeteer/chrome/linux-147.0.7727.57/chrome-linux64/chrome';
+  const results = {};
+
+  // 1. Arquivo existe?
+  results.exists = fs.existsSync(chromePath);
+
+  // 2. Permissões
+  try {
+    const stat = fs.statSync(chromePath);
+    results.mode = stat.mode.toString(8);
+    results.size = stat.size;
+  } catch (e) {
+    results.stat_error = e.message;
+  }
+
+  // 3. Tenta executar --version
+  try {
+    const version = execSync(`"${chromePath}" --version`, {
+      timeout: 5000,
+      env: { ...process.env, DISPLAY: '' }
+    }).toString().trim();
+    results.version = version;
+  } catch (e) {
+    results.exec_error = e.message;
+    results.exec_stderr = e.stderr?.toString();
+  }
+
+  // 4. Tenta puppeteer.launch()
+  try {
+    const browser = await puppeteer.launch({
+      executablePath: chromePath,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      headless: true,
+    });
+    results.launch = 'success';
+    await browser.close();
+  } catch (e) {
+    results.launch_error = e.message;
+  }
+
+  res.json(results);
+});
+
+
 // rota temporária de diagnóstico — remover após resolver
 app.get('/debug-chrome', async (req, res) => {
   const { execSync } = await import('child_process');

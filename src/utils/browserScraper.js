@@ -33,18 +33,19 @@ export async function scrapeWithBrowser(url, options = {}) {
 
   let browser;
   try {
-    browser = await puppeteer.launch({
+    const browser = await puppeteer.launch({
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
       headless: true,
-      // ...(executablePath ? { executablePath } : {}),
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
+        '--disable-dev-shm-usage',      // ← crítico no Render (pouca /dev/shm)
         '--disable-gpu',
-        '--single-process',
+        '--no-zygote',                  // ← evita crash em containers
+        '--single-process',             // ← fallback se --no-zygote falhar
       ],
     });
+
 
     const page = await browser.newPage();
     await page.setUserAgent(userAgent);
