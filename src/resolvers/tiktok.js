@@ -4,6 +4,7 @@ import { scrapeWithBrowser } from '../utils/browserScraper.js';
 import { takeScreenshot } from '../utils/screenshotService.js';
 
 const TIKTOK_ICON = 'https://www.tiktok.com/favicon.ico';
+const RESOLVE_TIMEOUT_MS = 12_000;
 
 function parseTiktokUrl(url) {
   try {
@@ -33,88 +34,117 @@ async function resolveViaOembed(url) {
   };
 }
 
-async function resolveProfileFallback(url, username) {
-  // Tenta screenshot direto sem browser scraping (TikTok bloqueia scraping de perfil)
-  // src/resolvers/tiktok.js
-  image = await takeScreenshot(url, {
-    waitUntil: 'domcontentloaded',
-    timeout: 10_000,
-    waitAfterLoad: 1_500, // aguarda 1.5s para JS renderizar
-  }).catch(() => null);
-
-
-  return {
-    title: `@${username} no TikTok`,
-    description: null,
-    image,
-    authorName: username,
-  };
+function withTimeout(promise, ms, label) {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`Timeout (${ms}ms): ${label}`)), ms)
+  );
+  return Promise.race([promise, timeout]);
 }
 
-export async function resolveTiktok(url) {
+async function _resolveTiktok(url) {
   const { subtype, username, videoId } = parseTiktokUrl(url);
 
+  // ✅ Todas as variáveis inicializadas com null
   let title = null;
   let description = null;
   let image = null;
-  let authorName = username;
+  let authorName = username ?? null;
 
   if (subtype === 'video') {
-    // oEmbed funciona para vídeos
+    // 1. oEmbed
     try {
       const oembed = await resolveViaOembed(url);
-      title = oembed.title;
-      image = oembed.image;
-      authorName = oembed.authorName || username;
+      title = oembed.title ?? null;
+      image = oembed.image ?? null;
+      authorName = oembed.authorName ?? username ?? null;
     } catch (err) {
       console.warn('[TikTok] oEmbed falhou:', err.message);
     }
 
-    // Trecho em resolveTiktok() — subtype === 'video'
+    // 2. Fallback browser
     if (!title || !image) {
       try {
-        const browser = await scrapeWithBrowser(url);
+        const browser = await withTimeout(
+          scrapeWithBrowser(url),
+          10_000,
+          'scrapeWithBrowser TikTok video'
+        );
         title = title || browser.title || null;
         description = browser.description?.slice(0, 400) || null;
 
         if (!image) {
-          // screenshot agora é responsabilidade explícita do screenshotService
           image = browser.image?.startsWith('http') ? browser.image : null;
-          if (!image) {
-            image = await takeScreenshot(url).catch(() => null);
-          }
+        }
+        if (!image) {
+          image = await withTimeout(
+            takeScreenshot(url, { waitUntil: 'domcontentloaded', timeout: 10_000 }),
+            10_000,
+            'takeScreenshot TikTok video'
+          ).catch(() => null);
         }
       } catch (err) {
         console.warn('[TikTok] Browser scraping falhou:', err.message);
       }
     }
+
   } else if (subtype === 'profile') {
-    // Perfis não têm oEmbed — usa screenshot direto
-    const fallback = await resolveProfileFallback(url, username);
-    title = fallback.title;
-    description = fallback.description;
-    image = fallback.image;
-    authorName = fallback.authorName;
+    // Perfis não têm oEmbed — screenshot direto
+    try {
+      image = await withTimeout(
+        takeScreenshot(url, { waitUntil: 'domcontentloaded', timeout: 10_000, waitAfterLoad: 1500 }),
+        12_000,
+        'takeScreenshot TikTok profile'
+      );
+    } catch (err) {
+      console.warn('[TikTok] Screenshot de perfil falhou:', err.message);
+      image = null; // ✅ garante que image é null, nunca undefined
+    }
+
+    title = username ? `@${username} no TikTok` : 'TikTok';
+    description = null;
+    authorName = username ?? null;
   }
 
   // Fallback final
-  if (!title) {
-    title = username ? `@${username} no TikTok` : 'TikTok';
-  }
+  if (!title) title = username ? `@${username} no TikTok` : 'TikTok';
 
   return {
     type: 'tiktok',
     title,
-    description,
-    image,
+    description,   // ✅ sempre string | null
+    image,         // ✅ sempre string | null — nunca undefined
     icon: TIKTOK_ICON,
     url,
     extra: {
       siteName: 'TikTok',
       subtype,
-      username,
-      videoId,
-      authorName,
+      username: username ?? null,
+      videoId: videoId ?? null,
+      authorName: authorName ?? null,
     },
   };
+}
+
+export async function resolveTiktok(url) {
+  try {
+    return await withTimeout(_resolveTiktok(url), RESOLVE_TIMEOUT_MS, 'resolveTiktok global');
+  } catch (err) {
+    console.warn('[TikTok] Resolver expirou ou falhou:', err.message);
+    const { subtype, username, videoId } = parseTiktokUrl(url);
+    return {
+      type: 'tiktok',
+      title: username ? `@${username} no TikTok` : 'TikTok',
+      description: null,
+      image: null, // ✅ null explícito
+      icon: TIKTOK_ICON,
+      url,
+      extra: {
+        siteName: 'TikTok',
+        subtype,
+        username: username ?? null,
+        videoId: videoId ?? null,
+        authorName: username ?? null,
+      },
+    };
+  }
 }
