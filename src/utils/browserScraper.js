@@ -1,10 +1,12 @@
 // src/utils/browserScraper.js
-import puppeteer from './puppeteerInstance.js'; // ✅ era: import puppeteer from 'puppeteer'
+import puppeteer from './puppeteerInstance.js';
 
+// ✅ UA de browser real — Googlebot era bloqueado por Instagram/TikTok/LinkedIn
 const DEFAULT_UA =
-  'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
+  'AppleWebKit/537.36 (KHTML, like Gecko) ' +
+  'Chrome/124.0.0.0 Safari/537.36';
 
-// ✅ Flag compartilhada para evitar double-close
 function makeBrowserGuard() {
   let _browser = null;
   let _closed = false;
@@ -14,7 +16,7 @@ function makeBrowserGuard() {
     async close() {
       if (_closed || !_browser) return;
       _closed = true;
-      await _browser.close().catch(() => { });
+      await _browser.close().catch(() => {});
       _browser = null;
     },
     get alive() { return !!_browser && !_closed; },
@@ -31,11 +33,10 @@ export async function scrapeWithBrowser(url, options = {}) {
 
   const guard = makeBrowserGuard();
 
-  // ✅ Kill timer síncrono — sem async/await
   const killTimer = setTimeout(() => {
     if (guard.alive) {
       console.warn('[browserScraper] ⏱ Kill timer — forçando close()');
-      guard.close(); // fire-and-forget intencional aqui, mas sem double-close
+      guard.close();
     }
   }, timeout + 5_000);
 
@@ -48,7 +49,7 @@ export async function scrapeWithBrowser(url, options = {}) {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
-        '--no-zygote',        // ✅ removido --single-process (incompatível)
+        '--no-zygote',
         '--memory-pressure-off',
         '--max_old_space_size=256',
         '--disable-extensions',
@@ -76,9 +77,19 @@ export async function scrapeWithBrowser(url, options = {}) {
     await page.setUserAgent(userAgent);
     await page.setExtraHTTPHeaders({
       'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Upgrade-Insecure-Requests': '1',
     });
+
+    // ✅ Stealth já cobre webdriver, mas headers extras ajudam contra fingerprint
     await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      // Remove propriedades que denunciam automação
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
     });
 
     try {
@@ -143,7 +154,7 @@ export async function scrapeWithBrowser(url, options = {}) {
     return meta;
 
   } finally {
-    clearTimeout(killTimer); // ✅ cancela kill timer ANTES de fechar
-    await guard.close();     // ✅ idempotente — só fecha se ainda não fechou
+    clearTimeout(killTimer);
+    await guard.close();
   }
 }
