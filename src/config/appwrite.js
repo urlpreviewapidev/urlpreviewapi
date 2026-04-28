@@ -1,14 +1,24 @@
-import { Client, Databases, Storage, ID, Query } from 'node-appwrite';
+// src/config/appwrite.js
+import { Client, Databases } from 'node-appwrite';
+
+const endpoint = process.env.APPWRITE_ENDPOINT;
+const projectId = process.env.APPWRITE_PROJECT_ID;
+const apiKey = process.env.APPWRITE_API_KEY;
+
+// Falha com mensagem clara em vez de erro genérico do SDK
+if (!endpoint || !projectId || !apiKey) {
+  throw new Error(
+    'Variáveis de ambiente do Appwrite ausentes: ' +
+    ['APPWRITE_ENDPOINT', 'APPWRITE_PROJECT_ID', 'APPWRITE_API_KEY']
+      .filter(k => !process.env[k])
+      .join(', ')
+  );
+}
 
 const client = new Client()
-  .setEndpoint(process.env.APPWRITE_ENDPOINT)
-  .setProject(process.env.APPWRITE_PROJECT_ID)
-  .setKey(process.env.APPWRITE_API_KEY);
+  .setEndpoint(endpoint)
+  .setProject(projectId)
+  .setKey(apiKey);
 
 export const databases = new Databases(client);
-export const storage = new Storage(client);
-export { ID, Query };
-
-export const DATABASE_ID = 'uai_db';
-export const COLLECTION_ID = 'url_previews';
-export const BUCKET_ID = 'preview_screenshots';
+export default client;
