@@ -37,20 +37,18 @@ function resolveImage(rawImage, pageUrl, screenshotData) {
   }
 }
 
+// src/resolvers/generic.js
 export async function resolveGeneric(url, type = 'generic') {
   const ogData = await tryOpenGraph(url).catch(() => ({}));
 
   let screenshotData = null;
   let browserData = {};
 
-  // ✅ Fix: entra no browser se QUALQUER campo estiver faltando (title OU image)
-  // antes era `&&` implícito porque o título satisfazia a condição mas image era ignorada
   const needsBrowser = !ogData.title || !ogData.image;
 
   if (needsBrowser) {
     browserData = await scrapeWithBrowser(url, {
-      // ✅ Tira screenshot no browser se ainda não temos imagem
-      takeScreenshot: !ogData.image,
+      takeScreenshot: true, // ✅ sempre tira screenshot dentro do browser (já carregado)
     }).catch(() => ({}));
 
     if (browserData.screenshot) {
@@ -63,8 +61,8 @@ export async function resolveGeneric(url, type = 'generic') {
   const title = merged.title || new URL(url).hostname;
   let image = resolveImage(merged.image, url, screenshotData);
 
-  // ✅ Screenshot dedicado como último recurso (quando browser não tirou)
-  if (!image) {
+  // ✅ Fallback só se browser não rodou (tinha title E image na OG mas image era inválida)
+  if (!image && !needsBrowser) {
     image = await takeScreenshot(url).catch(() => null);
   }
 
