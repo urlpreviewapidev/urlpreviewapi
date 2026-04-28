@@ -62,37 +62,34 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', chromeReady });
 });
 
-// Expõe informações de infraestrutura — disponível apenas fora de produção
-app.get('/debug-chrome', (req, res, next) => {
-  if (process.env.NODE_ENV === 'production') return res.status(404).end();
-  next();
-}, async (_req, res) => {
-  const { glob } = await import('glob');
+// rota temporária de diagnóstico — remover após resolver
+app.get('/debug-chrome', async (req, res) => {
   const { execSync } = await import('child_process');
-  const { CHROME_GLOB, PUPPETEER_CACHE_DIR } = await import('./utils/puppeteerConfig.js');
 
-  let findResult = '';
-  let whichResult = '';
-  let globResult = [];
+  const results = {};
 
+  // Tenta localizar o chrome
+  try { results.which_chrome = execSync('which chromium-browser || which chromium || which google-chrome || which chrome || echo "not found"').toString().trim(); } catch (e) { results.which_chrome = e.message; }
+
+  // Lista o cache do puppeteer
+  try { results.puppeteer_cache = execSync('find /opt/render/.cache/puppeteer -name "chrome" -o -name "chromium" 2>/dev/null | head -20').toString().trim(); } catch (e) { results.puppeteer_cache = e.message; }
+
+  // Verifica variáveis de ambiente relevantes
+  results.env = {
+    PUPPETEER_CACHE_DIR: process.env.PUPPETEER_CACHE_DIR,
+    PUPPETEER_EXECUTABLE_PATH: process.env.PUPPETEER_EXECUTABLE_PATH,
+    PUPPETEER_SKIP_DOWNLOAD: process.env.PUPPETEER_SKIP_DOWNLOAD,
+  };
+
+  // executablePath do puppeteer
   try {
-    findResult = execSync(
-      `find ${PUPPETEER_CACHE_DIR} -name "chrome" -type f 2>/dev/null || echo "nada"`
-    ).toString().trim();
-  } catch (e) { findResult = e.message; }
+    const puppeteer = await import('puppeteer');
+    results.puppeteer_executablePath = puppeteer.default.executablePath();
+  } catch (e) { results.puppeteer_executablePath = e.message; }
 
-  try {
-    whichResult = execSync(
-      'which chromium-browser || which chromium || which google-chrome || echo "nenhum no PATH"'
-    ).toString().trim();
-  } catch (e) { whichResult = e.message; }
-
-  try {
-    globResult = await glob(CHROME_GLOB);
-  } catch (e) { globResult = [e.message]; }
-
-  res.json({ findResult, whichResult, globResult, chromeReady, chromeError });
+  res.json(results);
 });
+
 
 // Helper compartilhado entre GET e POST
 async function handlePreview(url, res) {
