@@ -2,11 +2,11 @@
 import axios from 'axios';
 import { scrapeWithBrowser } from '../utils/browserScraper.js';
 import { takeScreenshot } from '../utils/screenshotService.js';
+import { decodeHTMLEntities } from '../utils/decodeEntities.js';
 
 const TIKTOK_ICON = 'https://www.tiktok.com/favicon.ico';
 const RESOLVE_TIMEOUT_MS = 25_000;
 
-// ✅ Títulos inúteis retornados pelo TikTok para bots
 const USELESS_TITLES = new Set([
   'tiktok',
   'www.tiktok.com',
@@ -30,7 +30,7 @@ function parseTiktokUrl(url) {
 
 function sanitizeTitle(title) {
   if (!title) return null;
-  const cleaned = title.trim();
+  const cleaned = decodeHTMLEntities(title.trim());
   if (USELESS_TITLES.has(cleaned.toLowerCase())) return null;
   return cleaned;
 }
@@ -49,7 +49,6 @@ async function resolveViaOembed(url, signal) {
   };
 }
 
-// ✅ HTTP OG para perfis — TikTok serve og:tags para alguns UAs
 async function resolveViaHttpOg(url) {
   const UAS = [
     'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
@@ -78,8 +77,12 @@ async function resolveViaHttpOg(url) {
         || null;
 
       const cleanTitle = sanitizeTitle(ogTitle);
-      if (ogImage || cleanTitle) {
-        return { title: cleanTitle, image: ogImage || null };
+
+      // ✅ Decodifica &amp; e outros entities na URL da imagem
+      const cleanImage = ogImage ? decodeHTMLEntities(ogImage) : null;
+
+      if (cleanImage || cleanTitle) {
+        return { title: cleanTitle, image: cleanImage };
       }
     } catch {
       // tenta próximo UA
@@ -103,7 +106,7 @@ async function _resolveTiktok(url, signal) {
   let authorName = username ?? null;
 
   if (subtype === 'video') {
-    // ── 1. oEmbed ─────────────────────────────────────────────────────────
+    // 1. oEmbed
     try {
       const oembed = await resolveViaOembed(url, signal);
       title = sanitizeTitle(oembed.title);
@@ -114,7 +117,7 @@ async function _resolveTiktok(url, signal) {
       console.warn('[TikTok] oEmbed falhou:', err.message);
     }
 
-    // ── 2. Fallback browser ────────────────────────────────────────────────
+    // 2. Fallback browser
     if (!title || !image) {
       try {
         const browser = await scrapeWithBrowser(url);
@@ -127,7 +130,7 @@ async function _resolveTiktok(url, signal) {
       }
     }
 
-    // ── 3. Screenshot ──────────────────────────────────────────────────────
+    // 3. Screenshot
     if (!image) {
       image = await takeScreenshot(url, {
         waitUntil: 'domcontentloaded',
@@ -136,7 +139,7 @@ async function _resolveTiktok(url, signal) {
     }
 
   } else if (subtype === 'profile') {
-    // ── 1. HTTP OG (mais leve — tenta primeiro) ────────────────────────────
+    // 1. HTTP OG
     try {
       const og = await resolveViaHttpOg(url);
       title = sanitizeTitle(og.title) || null;
@@ -146,7 +149,7 @@ async function _resolveTiktok(url, signal) {
       console.warn('[TikTok] HTTP OG falhou:', err.message);
     }
 
-    // ── 2. oEmbed para perfis (endpoint não-oficial — às vezes funciona) ──
+    // 2. oEmbed não-oficial
     if (!image) {
       try {
         const oembed = await resolveViaOembed(url, signal);
@@ -155,11 +158,10 @@ async function _resolveTiktok(url, signal) {
         authorName = oembed.authorName ?? username ?? null;
       } catch (err) {
         if (err.name === 'AbortError' || signal?.aborted) throw err;
-        // esperado falhar para perfis
       }
     }
 
-    // ── 3. Screenshot (último recurso) ────────────────────────────────────
+    // 3. Screenshot
     if (!image) {
       image = await takeScreenshot(url, {
         waitUntil: 'domcontentloaded',
@@ -169,7 +171,6 @@ async function _resolveTiktok(url, signal) {
     }
   }
 
-  // ── Fallback de título ─────────────────────────────────────────────────────
   if (!title) title = username ? `@${username} no TikTok` : 'TikTok';
 
   return {
@@ -191,7 +192,6 @@ async function _resolveTiktok(url, signal) {
 
 export async function resolveTiktok(url) {
   const { signal, clear } = createAbortableTimeout(RESOLVE_TIMEOUT_MS);
-
   try {
     const result = await _resolveTiktok(url, signal);
     clear();

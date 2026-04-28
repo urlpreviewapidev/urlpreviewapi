@@ -2,6 +2,7 @@
 import axios from 'axios';
 import { scrapeWithBrowser } from '../utils/browserScraper.js';
 import { takeScreenshot } from '../utils/screenshotService.js';
+import { decodeHTMLEntities } from '../utils/decodeEntities.js';
 
 const IG_ICON = 'https://www.google.com/s2/favicons?domain=www.instagram.com&sz=64';
 
@@ -11,7 +12,6 @@ const SCRAPER_UAS = [
   'LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)',
 ];
 
-// ✅ Títulos inúteis que o Instagram retorna para bots — descartados
 const USELESS_TITLES = new Set([
   'www.instagram.com',
   'instagram.com',
@@ -46,24 +46,17 @@ async function resolveViaOembed(url) {
   };
 }
 
-function decodeHTMLEntities(str) {
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'");
-}
-
-// ✅ Retorna null se o título for inútil (hostname, login wall, etc.)
 function sanitizeTitle(title) {
   if (!title) return null;
-  const cleaned = decodeHTMLEntities(title).trim();
+  // ✅ Decodifica entities ANTES de checar/limpar
+  const cleaned = decodeHTMLEntities(title.trim());
   if (USELESS_TITLES.has(cleaned.toLowerCase())) return null;
-  // Rejeita títulos que são apenas uma URL/domínio
   if (/^[\w.-]+\.(com|net|org|io|co)$/i.test(cleaned)) return null;
-  return cleaned;
+  // ✅ Remove o sufixo "• Instagram photos and videos" e similares
+  return cleaned
+    .replace(/\s*[•·]\s*Instagram (photos and videos|on Instagram)$/i, '')
+    .replace(/\s*\(@[\w.]+\)\s*/g, ' ')
+    .trim() || null;
 }
 
 async function resolveViaHttpOg(url) {
@@ -92,12 +85,14 @@ async function resolveViaHttpOg(url) {
         || null;
 
       const cleanTitle = sanitizeTitle(ogTitle);
+      // ✅ Decodifica entities na URL da imagem
+      const cleanImage = ogImage ? decodeHTMLEntities(ogImage) : null;
 
-      if (ogImage || cleanTitle) {
+      if (cleanImage || cleanTitle) {
         return {
           title: cleanTitle,
           description: ogDesc ? decodeHTMLEntities(ogDesc) : null,
-          image: ogImage || null,
+          image: cleanImage,
         };
       }
     } catch {
@@ -115,7 +110,7 @@ export async function resolveInstagram(url) {
   let image = null;
   let resolvedUsername = username;
 
-  // ── 1. oEmbed (só posts com token) ────────────────────────────────────────
+  // 1. oEmbed (só posts com token)
   if (subtype === 'post' && process.env.FB_ACCESS_TOKEN) {
     try {
       const oembed = await resolveViaOembed(url);
@@ -127,11 +122,10 @@ export async function resolveInstagram(url) {
     }
   }
 
-  // ── 2. HTTP + UA social ───────────────────────────────────────────────────
+  // 2. HTTP + UA social
   if (!title || !image) {
     try {
       const og = await resolveViaHttpOg(url);
-      // ✅ sanitizeTitle já foi aplicado dentro do resolveViaHttpOg
       title = title || og.title || null;
       description = description || og.description || null;
       image = image || og.image || null;
@@ -140,7 +134,7 @@ export async function resolveInstagram(url) {
     }
   }
 
-  // ── 3. Browser scraping ───────────────────────────────────────────────────
+  // 3. Browser scraping
   if (!title || !image) {
     try {
       const browser = await scrapeWithBrowser(url, { takeScreenshot: !image });
@@ -153,7 +147,7 @@ export async function resolveInstagram(url) {
     }
   }
 
-  // ── 4. Screenshot direto ───────────────────────────────────────────────────
+  // 4. Screenshot direto
   if (!image) {
     image = await takeScreenshot(url, {
       waitUntil: 'networkidle2',
@@ -162,7 +156,7 @@ export async function resolveInstagram(url) {
     }).catch(() => null);
   }
 
-  // ── Fallback de título ─────────────────────────────────────────────────────
+  // Fallback de título
   if (!title) {
     if (isProfile && resolvedUsername) title = `@${resolvedUsername} no Instagram`;
     else if (subtype === 'post') title = 'Post no Instagram';
